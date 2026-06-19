@@ -1,0 +1,4 @@
+email,firstName,lastName,title,company,industry,website,linkedin,painPoint
+jane.doe@acmehealth.com,Jane,Doe,VP of Operations,Acme Health,Healthcare,https://acmehealth.com,https://linkedin.com/in/janedoe,manual claims processing
+sam.lee@brightfin.io,Sam,Lee,Head of Growth,BrightFin,Fintech,https://brightfin.io,https://linkedin.com/in/samlee,slow lead response times
+maria.gomez@nordlogistics.com,Maria,Gomez,COO,Nord Logistics,Logistics,https://nordlogistics.com,https://linkedin.com/in/mariagomez,fragmented carrier data

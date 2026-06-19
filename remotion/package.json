@@ -1,0 +1,20 @@
+{
+  "name": "sdr-remotion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remotion project that renders Loom-style sales videos from a GLM-generated scene spec + Gemini TTS audio.",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render LoomVideo out/video.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "typescript": "^5.7.2"
+  }
+}
