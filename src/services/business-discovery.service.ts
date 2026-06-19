@@ -7,7 +7,26 @@ import { webSearch, type SearchResult } from "./search.service.js";
 const log = createLogger("business-discovery");
 
 const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
-const CONTACT_PATHS = ["", "/contact", "/contact-us", "/contacts", "/about", "/about-us", "/team", "/privacy"];
+const CONTACT_PATHS = [
+  "",
+  "/contact",
+  "/contact-us",
+  "/contacts",
+  "/about",
+  "/about-us",
+  "/team",
+  "/our-team",
+  "/staff",
+  "/people",
+  "/meet-the-team",
+  "/owner",
+  "/ownership",
+  "/founders",
+  "/services",
+  "/service-areas",
+  "/service-area",
+  "/privacy",
+];
 const GENERIC_MAILBOXES = ["info", "contact", "office", "sales", "service", "hello", "support"];
 const PLACEHOLDER_EMAIL_RE = /^(your|you|name|email|test|example|sample|someone|user|admin)@|@(example|domain|email)\./i;
 const WEBMAIL_DOMAINS = new Set(["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com"]);
@@ -156,6 +175,47 @@ export async function discoverBusinessContacts(params: BusinessContactDiscoveryP
   return { imported, candidates: candidates.length, searchResults: searchResults.length };
 }
 
+// ── Contractor-specific discovery ────────────────────────────────────────────
+
+export interface ContractorDiscoveryParams {
+  /** Trade type: "HVAC", "plumbing", "electrical", "roofing", "general contractor", etc. */
+  trade?: string;
+  location?: string;
+  keywords?: string;
+  limit?: number;
+  importGuessed?: boolean;
+  allowUnverified?: boolean;
+}
+
+/**
+ * Targeted contractor lead discovery: builds trade-specific SERP queries,
+ * crawls contractor websites (contact/about/team/service pages), extracts
+ * emails via mailto: hrefs, JSON-LD, and text regex, then verifies and imports.
+ *
+ * Usage: npm run cli discover-contractors --trade "roofing" --location "Austin, TX" --limit 20
+ */
+export async function discoverContractors(params: ContractorDiscoveryParams): Promise<{
+  imported: BusinessContactLead[];
+  candidates: number;
+  searchResults: number;
+}> {
+  const trade = params.trade ?? "contractor";
+  const tradeKeywords = [
+    params.keywords,
+    "owner operated",
+    "local",
+  ].filter(Boolean).join(" ");
+
+  return discoverBusinessContacts({
+    industry: trade,
+    location: params.location,
+    keywords: tradeKeywords,
+    limit: params.limit,
+    importGuessed: params.importGuessed,
+    allowUnverified: params.allowUnverified,
+  });
+}
+
 async function searchBusinesses(params: BusinessContactDiscoveryParams): Promise<SearchResult[]> {
   const terms = [params.industry, params.location, params.keywords].filter(Boolean).join(" ");
   const queries = [
@@ -163,8 +223,10 @@ async function searchBusinesses(params: BusinessContactDiscoveryParams): Promise
     `${terms} "contact" "email" -jobs -directory`,
     `${terms} business website email`,
     `${terms} contact us`,
-    `${terms} "info@" OR "service@"`,
-    `${terms} site:facebook.com email`,
+    `${terms} "info@" OR "service@" OR "admin@" OR "office@"`,
+    `${terms} mailto email address`,
+    `${terms} site:facebook.com email contact`,
+    `${terms} "email us" OR "send us an email"`,
   ].filter((q) => q.trim());
 
   const out: SearchResult[] = [];
@@ -357,10 +419,21 @@ async function crawlWebsiteForContacts(base: string): Promise<CrawlEvidence> {
     socialUrls: new Set(),
   };
 
+  let consecutiveTimeouts = 0;
+
   for (const path of CONTACT_PATHS) {
+    // If the last two fetches both timed out the site is blocking us — bail early.
+    if (consecutiveTimeouts >= 2) {
+      log.info("site appears unreachable — skipping remaining paths", { base });
+      break;
+    }
+
     const url = joinUrl(base, path);
     log.info("fetching contact page", { url });
-    const html = await fetchPublicHtml(url);
+    const { html, timedOut } = await fetchPublicHtml(url);
+    if (timedOut) consecutiveTimeouts++;
+    else consecutiveTimeouts = 0;
+
     if (!html) {
       log.info("contact page unavailable or not html", { url });
       continue;
@@ -368,7 +441,20 @@ async function crawlWebsiteForContacts(base: string): Promise<CrawlEvidence> {
     const emailsBefore = evidence.emails.size;
     const formsBefore = evidence.contactForms.size;
     const socialsBefore = evidence.socialUrls.size;
-    for (const email of extractEmails(html)) {
+    const siteDomain = hostOf(base).replace(/^www\./, "");
+    const allEmails = [
+      ...extractMailtoHrefs(html),   // primary: mailto: hrefs
+      ...extractJsonLdEmails(html),  // secondary: JSON-LD
+      ...extractEmails(html),        // tertiary: full-text regex
+    ];
+    for (const email of allEmails) {
+      const emailDomain = (email.split("@")[1] ?? "").replace(/^www\./, "");
+      // Only keep emails that belong to this site's domain — skip third-party
+      // widgets, "powered by" footers, and placeholder template emails.
+      if (emailDomain && emailDomain !== siteDomain && !WEBMAIL_DOMAINS.has(emailDomain)) {
+        log.debug("skipping off-domain email", { email, siteDomain, emailDomain });
+        continue;
+      }
       evidence.emails.set(email, url);
     }
     for (const social of extractSocialUrls(html, url)) {
@@ -388,7 +474,7 @@ async function crawlWebsiteForContacts(base: string): Promise<CrawlEvidence> {
   return evidence;
 }
 
-async function fetchPublicHtml(url: string): Promise<string> {
+async function fetchPublicHtml(url: string): Promise<{ html: string; timedOut: boolean }> {
   try {
     const res = await fetch(url, {
       headers: {
@@ -396,21 +482,23 @@ async function fetchPublicHtml(url: string): Promise<string> {
         "Accept-Language": "en-US,en;q=0.9",
         Accept: "text/html,application/xhtml+xml",
       },
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) {
       log.info("fetch failed status", { url, status: res.status });
-      return "";
+      return { html: "", timedOut: false };
     }
     const contentType = res.headers.get("content-type") ?? "";
     if (!contentType.includes("text/html")) {
       log.info("fetch skipped non-html", { url, contentType });
-      return "";
+      return { html: "", timedOut: false };
     }
-    return await res.text();
+    return { html: await res.text(), timedOut: false };
   } catch (err) {
-    log.info("fetch failed", { url, error: err instanceof Error ? err.message : String(err) });
-    return "";
+    const msg = err instanceof Error ? err.message : String(err);
+    const timedOut = /timeout|aborted/i.test(msg);
+    log.info("fetch failed", { url, error: msg });
+    return { html: "", timedOut };
   }
 }
 
@@ -437,6 +525,47 @@ async function verifyFoundEmail(
     return null;
   }
   return { email: verified.email, verdict: verified.verdict };
+}
+
+/** Pull emails from explicit mailto: href attributes — highest confidence source. */
+function extractMailtoHrefs(html: string): string[] {
+  const out: string[] = [];
+  const re = /href=["']mailto:([^"'?#\s]+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const email = cleanEmail(m[1].trim());
+    if (email) out.push(email);
+  }
+  return [...new Set(out)];
+}
+
+/** Parse JSON-LD blocks for schema.org ContactPoint/Organization email fields. */
+function extractJsonLdEmails(html: string): string[] {
+  const out: string[] = [];
+  const scriptRe = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = scriptRe.exec(html))) {
+    try {
+      const data = JSON.parse(m[1]);
+      collectJsonLdEmails(data, out);
+    } catch {
+      /* malformed JSON-LD — skip */
+    }
+  }
+  return [...new Set(out.map(cleanEmail).filter(Boolean))];
+}
+
+function collectJsonLdEmails(node: unknown, out: string[]): void {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectJsonLdEmails(item, out);
+    return;
+  }
+  const obj = node as Record<string, unknown>;
+  for (const key of ["email", "contactEmail", "emailAddress"]) {
+    if (typeof obj[key] === "string") out.push(obj[key] as string);
+  }
+  for (const val of Object.values(obj)) collectJsonLdEmails(val, out);
 }
 
 function extractEmails(text: string): string[] {

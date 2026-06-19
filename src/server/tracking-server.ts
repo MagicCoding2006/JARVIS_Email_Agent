@@ -1,4 +1,5 @@
 import express, { type Request, type Response } from "express";
+import { pathToFileURL } from "node:url";
 import { config } from "../config/index.js";
 import { createLogger } from "../lib/logger.js";
 import { ensureIndexes } from "../repositories/collections.js";
@@ -6,6 +7,7 @@ import { EventsRepo, LeadsRepo, MessagesRepo, EnrollmentsRepo, VideosRepo } from
 import { handleInboundReply } from "../services/replies.service.js";
 import { createGmailPixel } from "../services/compose.service.js";
 import { handleBookingWebhook, type BookingProvider } from "../services/booking.service.js";
+import { createDashboardRouter } from "./dashboard.js";
 
 const log = createLogger("tracking-server");
 
@@ -28,6 +30,12 @@ export function createApp() {
   app.use(express.urlencoded({ extended: true }));
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
+
+  // ── Dashboard ────────────────────────────────────────────────────────────────
+  app.use("/dashboard", createDashboardRouter());
+  // Trailing slash so relative URLs like ./api/crm resolve correctly in the browser.
+  app.get("/", (_req, res) => res.redirect("/dashboard/"));
+  app.get("/dashboard", (_req, res) => res.redirect("/dashboard/"));
 
   // ── Open tracking ──────────────────────────────────────────────────────────
   app.get("/o/:messageId.gif", async (req: Request, res: Response) => {
@@ -181,7 +189,8 @@ export async function startTrackingServer(): Promise<void> {
 }
 
 // Allow running standalone: `npm run tracking-server`
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Use pathToFileURL for reliable cross-platform comparison (Windows backslash vs forward slash).
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   startTrackingServer().catch((err) => {
     log.error("failed to start", err);
     process.exit(1);

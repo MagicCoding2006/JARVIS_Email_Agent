@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JARVIS Lead Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Segoe UI', system-ui, sans-serif; }
+  .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #111827; }
+  ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+  .stat-card { transition: transform .15s; }
+  .stat-card:hover { transform: translateY(-2px); }
+  .log-line { animation: fadein .2s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; } }
+  .spin { animation: spin 1s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  tr.new-lead { animation: highlight .8s ease; }
+  @keyframes highlight { from { background: #1e3a5f; } to { background: transparent; } }
+  .pill { display:inline-block; padding:2px 8px; border-radius:9999px; font-size:.7rem; font-weight:600; }
+  .pill-new        { background:#1f2937; color:#9ca3af; }
+  .pill-active     { background:#1e3a5f; color:#60a5fa; }
+  .pill-replied    { background:#2e1065; color:#c084fc; }
+  .pill-meeting    { background:#052e16; color:#34d399; }
+  .pill-won        { background:#052e16; color:#10b981; }
+  .pill-lost       { background:#450a0a; color:#f87171; }
+  .pill-bounced    { background:#431407; color:#fb923c; }
+  .pill-unsubscribed { background:#1f2937; color:#6b7280; }
+  .pill-do_not_contact { background:#450a0a; color:#ef4444; }
+</style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col">
+
+<!-- ── Header ───────────────────────────────────────────────────────────── -->
+<header class="bg-gray-900 border-b border-gray-800 px-5 py-3 flex items-center gap-4 sticky top-0 z-20">
+  <div class="flex items-center gap-2">
+    <span class="text-blue-400 text-lg">⚡</span>
+    <span class="font-bold text-white tracking-wide">JARVIS SDR</span>
+  </div>
+  <div class="flex-1"></div>
+  <div id="badge-dryrun" class="hidden pill bg-amber-900 text-amber-300">DRY RUN</div>
+  <div id="badge-conn" class="pill bg-gray-800 text-gray-400">⬤ connecting…</div>
+  <div id="badge-total" class="pill bg-blue-900 text-blue-300">— leads</div>
+</header>
+
+<!-- ── Stats row ─────────────────────────────────────────────────────────── -->
+<div class="bg-gray-900 border-b border-gray-800 px-5 py-3 flex gap-3 flex-wrap">
+  <div class="stat-card bg-gray-800 rounded-lg px-4 py-2 min-w-[80px] text-center cursor-default" onclick="filterCrm('')">
+    <div class="text-xs text-gray-400 mb-1">Total</div>
+    <div id="s-total" class="text-xl font-bold text-white">—</div>
+  </div>
+  <div class="stat-card bg-gray-800 rounded-lg px-4 py-2 min-w-[80px] text-center cursor-pointer hover:bg-gray-700" onclick="filterCrm('new')">
+    <div class="text-xs text-gray-400 mb-1">New</div>
+    <div id="s-new" class="text-xl font-bold text-gray-300">—</div>
+  </div>
+  <div class="stat-card bg-gray-800 rounded-lg px-4 py-2 min-w-[80px] text-center cursor-pointer hover:bg-gray-700" onclick="filterCrm('active')">
+    <div class="text-xs text-blue-400 mb-1">Active</div>
+    <div id="s-active" class="text-xl font-bold text-blue-400">—</div>
+  </div>
+  <div class="stat-card bg-gray-800 rounded-lg px-4 py-2 min-w-[80px] text-center cursor-pointer hover:bg-gray-700" onclick="filterCrm('replied')">
+    <div class="text-xs text-purple-400 mb-1">Replied</div>
+    <div id="s-replied" class="text-xl font-bold text-purple-400">—</div>
+  </div>
+  <div class="stat-card bg-gray-800 rounded-lg px-4 py-2 min-w-[80px] text-center cursor-pointer hover:bg-gray-700" onclick="filterCrm('meeting')">
+    <div class="text-xs text-emerald-400 mb-1">Meeting</div>
+    <div id="s-meeting" class="text-xl font-bold text-emerald-400">—</div>
+  </div>
+  <div class="stat-card bg-gray-800 rounded-lg px-4 py-2 min-w-[80px] text-center cursor-pointer hover:bg-gray-700" onclick="filterCrm('won')">
+    <div class="text-xs text-green-400 mb-1">Won</div>
+    <div id="s-won" class="text-xl font-bold text-green-400">—</div>
+  </div>
+  <div class="stat-card bg-gray-800 rounded-lg px-4 py-2 min-w-[80px] text-center cursor-default">
+    <div class="text-xs text-red-400 mb-1">🔥 Hot</div>
+    <div id="s-hot" class="text-xl font-bold text-red-400">—</div>
+  </div>
+</div>
+
+<!-- ── Main layout ────────────────────────────────────────────────────────── -->
+<div class="flex flex-1 overflow-hidden" style="min-height:0">
+
+  <!-- Sidebar -->
+  <aside class="w-72 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto">
+
+    <!-- Find Leads -->
+    <div class="p-4 border-b border-gray-800">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Find Leads</h2>
+      <form id="discover-form" class="flex flex-col gap-2">
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Trade / Industry</label>
+          <input id="f-trade" type="text" placeholder="e.g. roofing, HVAC, plumbing"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Location</label>
+          <input id="f-location" type="text" placeholder="e.g. Austin, TX"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Limit: <span id="f-limit-val">5</span></label>
+          <input id="f-limit" type="range" min="1" max="25" value="5"
+            class="w-full accent-blue-500"
+            oninput="document.getElementById('f-limit-val').textContent=this.value">
+        </div>
+        <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+          <input id="f-unverified" type="checkbox" class="accent-blue-500">
+          Allow unverified emails
+        </label>
+        <button type="submit" id="discover-btn"
+          class="mt-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded px-4 py-2 transition-colors">
+          🔍 Search for Leads
+        </button>
+      </form>
+    </div>
+
+    <!-- Campaigns -->
+    <div class="p-4 border-b border-gray-800">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Campaigns</h2>
+      <select id="campaign-select"
+        class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white mb-2 focus:outline-none focus:border-blue-500">
+        <option value="">— select campaign —</option>
+      </select>
+      <div class="flex flex-col gap-1.5">
+        <button onclick="enrollLeads()"
+          class="bg-purple-700 hover:bg-purple-600 text-white text-xs font-semibold rounded px-3 py-1.5 transition-colors">
+          ➕ Enroll New Leads
+        </button>
+        <button onclick="dispatchEmails()"
+          class="bg-gray-700 hover:bg-gray-600 text-white text-xs font-semibold rounded px-3 py-1.5 transition-colors">
+          📤 Send Emails
+        </button>
+      </div>
+      <div id="campaign-msg" class="text-xs text-gray-500 mt-2 hidden"></div>
+    </div>
+
+    <!-- Export -->
+    <div class="p-4">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Export</h2>
+      <a href="./api/crm/export"
+        class="flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold rounded px-3 py-1.5 transition-colors">
+        ⬇ Download CRM as CSV
+      </a>
+    </div>
+
+    <!-- Status -->
+    <div class="p-4 mt-auto border-t border-gray-800">
+      <div id="system-status" class="text-xs text-gray-600 mono">loading…</div>
+    </div>
+  </aside>
+
+  <!-- CRM Table -->
+  <main class="flex-1 flex flex-col overflow-hidden bg-gray-950">
+    <div class="px-4 py-2 border-b border-gray-800 flex items-center gap-3 bg-gray-900">
+      <span class="text-xs text-gray-400">CRM</span>
+      <span id="crm-count" class="text-xs text-gray-500">loading…</span>
+      <div class="flex-1"></div>
+      <input id="crm-filter-input" type="text" placeholder="Filter table…"
+        class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white placeholder-gray-600 w-40 focus:outline-none focus:border-blue-500"
+        oninput="applyFilter(this.value)">
+      <span id="crm-refresh" class="text-xs text-gray-600 mono">↻</span>
+    </div>
+
+    <div class="flex-1 overflow-auto">
+      <table class="w-full text-xs border-collapse">
+        <thead class="bg-gray-900 sticky top-0 z-10">
+          <tr>
+            <th class="text-left px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Email</th>
+            <th class="text-left px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Company</th>
+            <th class="text-left px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Status</th>
+            <th class="text-right px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Score</th>
+            <th class="text-right px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Sent</th>
+            <th class="text-right px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Open</th>
+            <th class="text-right px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Click</th>
+            <th class="text-right px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Reply</th>
+            <th class="text-right px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Mtg</th>
+            <th class="text-left px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Last Activity</th>
+          </tr>
+        </thead>
+        <tbody id="crm-tbody">
+          <tr>
+            <td colspan="10" class="text-center py-12 text-gray-600">Loading CRM data…</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<!-- ── Live Log Panel ─────────────────────────────────────────────────────── -->
+<div id="log-panel" class="hidden bg-gray-900 border-t border-gray-800 flex flex-col" style="height:200px">
+  <div class="flex items-center gap-2 px-4 py-2 border-b border-gray-800 flex-shrink-0">
+    <span class="text-xs font-semibold text-gray-400 uppercase tracking-widest">Live Log</span>
+    <span id="log-status" class="text-xs text-gray-600"></span>
+    <div class="flex-1"></div>
+    <button onclick="clearLog()" class="text-xs text-gray-600 hover:text-gray-400">clear</button>
+    <button onclick="document.getElementById('log-panel').classList.add('hidden')" class="text-xs text-gray-600 hover:text-gray-400 ml-2">✕</button>
+  </div>
+  <div id="log-output" class="flex-1 overflow-y-auto p-3 mono text-xs text-green-400 leading-5"></div>
+</div>
+
+<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+<div id="toast" class="fixed bottom-4 right-4 hidden z-50">
+  <div id="toast-inner" class="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-sm text-white shadow-xl max-w-xs"></div>
+</div>
+
+<script>
+// ── Helpers ─────────────────────────────────────────────────────────────────
+function stripAnsi(s) {
+  return s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1B\][^\x07]*\x07/g, '');
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric' }) + ' ' +
+         d.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
+}
+
+function toast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  const inner = document.getElementById('toast-inner');
+  inner.textContent = msg;
+  inner.className = `${isError ? 'bg-red-900 border-red-700 text-red-100' : 'bg-gray-800 border-gray-700 text-white'} rounded-lg px-4 py-3 text-sm shadow-xl max-w-xs`;
+  el.classList.remove('hidden');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add('hidden'), 3500);
+}
+
+// ── Stats ────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const r = await fetch('./api/stats');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    document.getElementById('s-total').textContent   = d.total;
+    document.getElementById('s-new').textContent     = d.newLeads;
+    document.getElementById('s-active').textContent  = d.active;
+    document.getElementById('s-replied').textContent = d.replied;
+    document.getElementById('s-meeting').textContent = d.meetings;
+    document.getElementById('s-won').textContent     = d.won;
+    document.getElementById('s-hot').textContent     = d.hot;
+    document.getElementById('badge-total').textContent = d.total + ' leads';
+    document.getElementById('badge-conn').textContent  = '⬤ connected';
+    document.getElementById('badge-conn').className    = 'pill bg-emerald-900 text-emerald-400';
+    if (d.dryRun) document.getElementById('badge-dryrun').classList.remove('hidden');
+    document.getElementById('system-status').innerHTML =
+      `Limit: ${d.dailyLimit}/day<br>Mode: ${d.dryRun ? '🔶 DRY RUN (no real sends)' : '🟢 LIVE'}`;
+  } catch (e) {
+    document.getElementById('badge-conn').textContent = '⬤ error';
+    document.getElementById('badge-conn').className = 'pill bg-red-900 text-red-400';
+  }
+}
+
+// ── CRM Table ────────────────────────────────────────────────────────────────
+let allRows = [];
+let crmFilter = '';
+let prevEmails = new Set();
+
+function statusPill(s) {
+  return `<span class="pill pill-${s}">${s}</span>`;
+}
+
+function renderCrm(rows) {
+  const tbody = document.getElementById('crm-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="10" class="text-center py-12 text-gray-600">No leads yet — use Find Leads to get started.</td></tr>`;
+    return;
+  }
+  const newEmails = new Set(rows.map(r => r.email));
+  tbody.innerHTML = rows.map(r => {
+    const isNew = !prevEmails.has(r.email) && prevEmails.size > 0;
+    return `<tr class="${isNew ? 'new-lead' : ''} border-b border-gray-800 hover:bg-gray-900 transition-colors">
+      <td class="px-3 py-2 text-blue-300 mono">${r.email}</td>
+      <td class="px-3 py-2 text-gray-300 max-w-[140px] truncate" title="${r.company}">${r.company || '—'}</td>
+      <td class="px-3 py-2">${statusPill(r.status)}</td>
+      <td class="px-3 py-2 text-right font-bold ${r.score >= 70 ? 'text-red-400' : r.score > 0 ? 'text-yellow-400' : 'text-gray-600'}">${r.score}</td>
+      <td class="px-3 py-2 text-right text-gray-400">${r.emailsSent || '—'}</td>
+      <td class="px-3 py-2 text-right ${r.opens > 0 ? 'text-blue-400' : 'text-gray-600'}">${r.opens || '—'}</td>
+      <td class="px-3 py-2 text-right ${r.clicks > 0 ? 'text-purple-400' : 'text-gray-600'}">${r.clicks || '—'}</td>
+      <td class="px-3 py-2 text-right ${r.replies > 0 ? 'text-emerald-400' : 'text-gray-600'}">${r.replies || '—'}</td>
+      <td class="px-3 py-2 text-right ${r.meetings > 0 ? 'text-green-400 font-bold' : 'text-gray-600'}">${r.meetings || '—'}</td>
+      <td class="px-3 py-2 text-gray-600 mono">${fmtDate(r.lastActivity)}</td>
+    </tr>`;
+  }).join('');
+  prevEmails = newEmails;
+}
+
+function applyFilter(q) {
+  crmFilter = q.toLowerCase();
+  const filtered = crmFilter
+    ? allRows.filter(r =>
+        r.email.toLowerCase().includes(crmFilter) ||
+        (r.company || '').toLowerCase().includes(crmFilter) ||
+        r.status.includes(crmFilter))
+    : allRows;
+  renderCrm(filtered);
+  document.getElementById('crm-count').textContent =
+    filtered.length === allRows.length ? `${allRows.length} leads` : `${filtered.length} of ${allRows.length} leads`;
+}
+
+function filterCrm(status) {
+  document.getElementById('crm-filter-input').value = status;
+  applyFilter(status);
+}
+
+async function loadCrm() {
+  const indicator = document.getElementById('crm-refresh');
+  try {
+    indicator.textContent = '↻';
+    const r = await fetch('./api/crm');
+    if (!r.ok) throw new Error(r.status);
+    allRows = await r.json();
+    applyFilter(crmFilter);
+    indicator.textContent = '✓ ' + new Date().toLocaleTimeString();
+  } catch {
+    indicator.textContent = '✗ error';
+  }
+}
+
+// ── Campaigns ────────────────────────────────────────────────────────────────
+async function loadCampaigns() {
+  try {
+    const r = await fetch('./api/campaigns');
+    const campaigns = await r.json();
+    const sel = document.getElementById('campaign-select');
+    sel.innerHTML = '<option value="">— select campaign —</option>' +
+      campaigns.map(c => `<option value="${c._id}">${c.name} (${c.status})</option>`).join('');
+  } catch {}
+}
+
+async function enrollLeads() {
+  const campaignId = document.getElementById('campaign-select').value;
+  if (!campaignId) { toast('Select a campaign first', true); return; }
+  const msg = document.getElementById('campaign-msg');
+  msg.textContent = 'Enrolling…'; msg.classList.remove('hidden');
+  try {
+    const r = await fetch('./api/enroll', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId })
+    });
+    const d = await r.json();
+    msg.textContent = `✓ Enrolled ${d.enrolled} new leads`;
+    toast(`Enrolled ${d.enrolled} leads into campaign`);
+    loadCrm();
+  } catch (e) {
+    msg.textContent = 'Error enrolling'; toast('Enroll failed', true);
+  }
+}
+
+async function dispatchEmails() {
+  const msg = document.getElementById('campaign-msg');
+  msg.textContent = 'Dispatching…'; msg.classList.remove('hidden');
+  try {
+    const r = await fetch('./api/dispatch', { method: 'POST' });
+    const d = await r.json();
+    const txt = `Sent ${d.sent}, skipped ${d.skipped}, failed ${d.failed}`;
+    msg.textContent = '✓ ' + txt;
+    toast(txt);
+    loadCrm(); loadStats();
+  } catch {
+    msg.textContent = 'Dispatch failed'; toast('Dispatch failed', true);
+  }
+}
+
+// ── Discover (SSE stream) ────────────────────────────────────────────────────
+function appendLog(text) {
+  const out = document.getElementById('log-output');
+  const clean = stripAnsi(text).trim();
+  if (!clean) return;
+  // parse the logger format: "2026-... INFO  [module] message"
+  let display = clean;
+  let color = 'text-green-400';
+  if (/ERROR/i.test(clean)) color = 'text-red-400';
+  else if (/WARN/i.test(clean)) color = 'text-yellow-400';
+  else if (/DEBUG/i.test(clean)) color = 'text-gray-500';
+  else if (/INFO/i.test(clean)) color = 'text-gray-300';
+  const line = document.createElement('div');
+  line.className = `log-line ${color}`;
+  line.textContent = display;
+  out.appendChild(line);
+  out.scrollTop = out.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('log-output').innerHTML = '';
+}
+
+document.getElementById('discover-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const trade    = document.getElementById('f-trade').value.trim();
+  const location = document.getElementById('f-location').value.trim();
+  const limit    = document.getElementById('f-limit').value;
+  const allowUnverified = document.getElementById('f-unverified').checked;
+
+  if (!trade) { toast('Enter a trade (e.g. roofing)', true); return; }
+
+  const btn = document.getElementById('discover-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin">↻</span> Searching…';
+
+  const logPanel = document.getElementById('log-panel');
+  const logStatus = document.getElementById('log-status');
+  logPanel.classList.remove('hidden');
+  logStatus.textContent = `— searching for ${trade} in ${location || 'any location'}…`;
+  appendLog(`▶ Starting: discover-contractors --trade "${trade}" --location "${location}" --limit ${limit}`);
+
+  try {
+    const resp = await fetch('./api/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trade, location, limit: Number(limit), allowUnverified })
+    });
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() ?? '';
+      for (const part of parts) {
+        if (!part.startsWith('data: ')) continue;
+        try {
+          const ev = JSON.parse(part.slice(6));
+          if (ev.type === 'log') appendLog(ev.text);
+          if (ev.type === 'error') appendLog('ERROR: ' + ev.text);
+          if (ev.type === 'done') {
+            const ok = ev.code === 0;
+            logStatus.textContent = ok ? '✓ done' : `✗ exited ${ev.code}`;
+            appendLog(ok ? '✓ Discovery complete.' : `✗ Process exited with code ${ev.code}`);
+            toast(ok ? `Done! Check the CRM table for new leads.` : 'Search finished with errors');
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    appendLog('Connection error: ' + err.message);
+    toast('Search failed', true);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '🔍 Search for Leads';
+  loadCrm(); loadStats();
+});
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+loadStats();
+loadCrm();
+loadCampaigns();
+setInterval(loadStats, 8000);
+setInterval(loadCrm,   4000);
+setInterval(loadCampaigns, 30000);
+</script>
+</body>
+</html>

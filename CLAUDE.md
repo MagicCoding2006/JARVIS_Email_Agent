@@ -62,8 +62,10 @@ MONGODB_URI=mongodb://dummy TRACKING_BASE_URL=http://localhost:8787 npx tsx scri
 Key CLI verbs: `import-leads`, `create-campaign`, `enroll`, `dispatch`,
 `process-events`, `daily-cycle`, `weekly-review`, `monthly-review`,
 `gen-variants`, `list-variants`, `make-pixel`, `video-script`, `produce-video`,
-`chat`, `agent-cycle`, `discover-leads`, `verify-email`, `source-leads`,
-`research`, `approvals`, `approve`/`deny`, `ingest-reply`, `event`, `status`, `lead`.
+`chat`, `agent-cycle`, `discover-leads`, `discover-businesses`,
+`discover-contractors`, `verify-email`, `source-leads`, `research`,
+`crm`, `crm-export`, `approvals`, `approve`/`deny`, `ingest-reply`,
+`event`, `status`, `lead`.
 
 Chat with the brain from the terminal: `npm run cli chat --text "how are we doing?"`.
 Run the autonomous daily brain on demand: `npm run cli agent-cycle`.
@@ -129,6 +131,13 @@ Full layer-by-layer status and the data model are in [ARCHITECTURE.md](./ARCHITE
 - **Free, default path**: `discover_leads` / CLI `discover-leads` — web search →
   LLM extracts people → derive company domain → `lib/email-verify.ts` generates
   email patterns + MX/SMTP-verifies → import deliverable leads. No Apollo needed.
+- **Contractor/business sourcing**: `discover-businesses` and `discover-contractors`
+  (`services/business-discovery.service.ts`) — SERP queries → crawl official
+  contractor websites (contact/about/team/service pages) → extract emails via
+  `mailto:` hrefs (highest confidence), JSON-LD structured data, and full-text
+  regex → MX/SMTP verify → import. The `discover-contractors` command is a
+  pre-tuned wrapper for trades (HVAC, roofing, plumbing, electrical, etc.) that
+  adds "owner operated local" qualifier terms and uses trade as the industry tag.
 - **Search backends** (`services/search.service.ts`, `SEARCH_PROVIDER`):
   `duckduckgo` (free, no key, but rate-limits under bursts — fine for light use),
   `searxng` (free, self-hosted, **recommended** for discovery's multi-query load),
@@ -138,6 +147,22 @@ Full layer-by-layer status and the data model are in [ARCHITECTURE.md](./ARCHITE
 - SMTP verification uses port 25, which many ISPs block → emails come back
   "guessed"; those import only if `DISCOVERY_IMPORT_GUESSED=true` and bounces
   auto-stop bad ones.
+
+## CRM view and export
+
+Leads are the CRM — stored in MongoDB with status, score, and a full event log.
+The CRM service (`services/crm.service.ts`) joins leads with their lifetime email
+stats (sent, opens, clicks, replies, meetings) in one aggregation:
+
+- `npm run cli crm [--status active|replied|meeting]` — ASCII table view of all
+  leads with engagement stats; filter by status with `--status`.
+- `npm run cli crm-export [--file leads.csv]` — export everything to CSV
+  (default `crm-export.csv`), openable in Excel / Google Sheets.
+
+The CRM auto-updates as emails flow: the dispatcher marks leads `active` on first
+send; the event-processor transitions them to `replied`, `meeting`, `won`, `lost`,
+`bounced`, or `unsubscribed` as signals come in. Scores accumulate per event and
+the CRM table shows the running total.
 
 ## Gotchas / guardrails
 

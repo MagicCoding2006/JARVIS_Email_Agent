@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { parse } from "csv-parse/sync";
 import { createLogger } from "../lib/logger.js";
 import { closeDb } from "../lib/mongo.js";
@@ -24,7 +24,8 @@ import { createVideoForLead, produceVideo } from "../services/video.service.js";
 import { researchLead } from "../services/research.service.js";
 import { sourceLeadsFromApollo } from "../services/apollo.service.js";
 import { discoverLeads } from "../services/discovery.service.js";
-import { discoverBusinessContacts } from "../services/business-discovery.service.js";
+import { discoverBusinessContacts, discoverContractors } from "../services/business-discovery.service.js";
+import { buildCrmSnapshot, toCsv, printCrmTable } from "../services/crm.service.js";
 import { emailCandidates, verifyBestEmail } from "../lib/email-verify.js";
 import { handleChat } from "../agent/agent.js";
 import { runAutonomousCycle } from "../workers/autonomous-cycle.js";
@@ -374,6 +375,35 @@ async function cmdResearch(p: Parsed) {
   }
 }
 
+async function cmdDiscoverContractors(p: Parsed) {
+  const r = await discoverContractors({
+    trade: str(p.flags.trade) || str(p.flags.industry) || undefined,
+    location: str(p.flags.location) || undefined,
+    keywords: str(p.flags.keywords) || undefined,
+    limit: int(p.flags.limit, 10),
+    importGuessed: p.flags["import-guessed"] === true ? true : undefined,
+    allowUnverified: p.flags["allow-unverified"] === true ? true : undefined,
+  });
+  log.info(`${r.searchResults} results → ${r.candidates} contractors → imported ${r.imported.length}`);
+  for (const l of r.imported) {
+    log.info(`  ${l.email} [${l.verdict}/${l.confidence}] — ${l.company} via ${l.evidenceUrl}`);
+  }
+}
+
+async function cmdCrm(p: Parsed) {
+  const rows = await buildCrmSnapshot();
+  const status = str(p.flags.status);
+  const filtered = status ? rows.filter((r) => r.status === status) : rows;
+  printCrmTable(filtered);
+}
+
+async function cmdCrmExport(p: Parsed) {
+  const rows = await buildCrmSnapshot();
+  const file = str(p.flags.file, "crm-export.csv");
+  writeFileSync(file, toCsv(rows), "utf-8");
+  log.info(`exported ${rows.length} leads → ${file}`);
+}
+
 async function cmdProduceVideo(p: Parsed) {
   const id = p._[0] || str(p.flags.video);
   if (!id) throw new Error("usage: cli produce-video <videoId>");
@@ -424,6 +454,9 @@ const HELP = `AI SDR CLI
   agent-cycle                   run the autonomous daily brain now
   discover-leads --role "VP Ops" --industry "Healthcare" [--company --location --keywords --limit]   FREE sourcing
   discover-businesses --industry "HVAC" --location "Indianapolis, IN" [--keywords --limit --import-guessed --allow-unverified]
+  discover-contractors --trade "roofing" --location "Austin, TX" [--keywords --limit --import-guessed --allow-unverified]   contractor-targeted sourcing
+  crm [--status active|replied|meeting]                 live CRM table view (all leads + engagement stats)
+  crm-export [--file leads.csv]                         export full CRM to CSV (default: crm-export.csv)
   verify-email --email <e> | --first --last --domain    check deliverability (MX + SMTP)
   source-leads --titles "VP Ops,COO" --industries "Healthcare" [--keywords] [--limit]   Apollo (paid)
   research --email <e>          web-research a lead + save hooks
@@ -461,6 +494,9 @@ async function run() {
     case "agent-cycle": await cmdAgentCycle(); break;
     case "discover-leads": await cmdDiscoverLeads(p); break;
     case "discover-businesses": await cmdDiscoverBusinessContacts(p); break;
+    case "discover-contractors": await cmdDiscoverContractors(p); break;
+    case "crm": await cmdCrm(p); break;
+    case "crm-export": await cmdCrmExport(p); break;
     case "verify-email": await cmdVerifyEmail(p); break;
     case "source-leads": await cmdSourceLeads(p); break;
     case "research": await cmdResearch(p); break;
