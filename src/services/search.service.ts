@@ -47,6 +47,7 @@ function warnEmpty(provider: string): SearchResult[] {
 // without a key, self-host SearXNG instead.
 async function duckduckgo(query: string, limit: number): Promise<SearchResult[]> {
   let html = "";
+  let lastStatus = 0;
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await fetch("https://lite.duckduckgo.com/lite/", {
       method: "POST",
@@ -57,7 +58,16 @@ async function duckduckgo(query: string, limit: number): Promise<SearchResult[]>
       },
       body: `q=${encodeURIComponent(query)}`,
     });
+    lastStatus = res.status;
     html = await res.text();
+    log.info("duckduckgo search attempt", {
+      query,
+      attempt: attempt + 1,
+      status: res.status,
+      htmlLength: html.length,
+      hasResultLinks: html.includes("result-link"),
+      looksLikeChallenge: looksLikeDuckDuckGoChallenge(html),
+    });
     if (res.status === 200 && html.includes("result-link")) break;
     await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
   }
@@ -73,7 +83,27 @@ async function duckduckgo(query: string, limit: number): Promise<SearchResult[]>
   const snips: string[] = [];
   while ((m = snipRe.exec(html)) && snips.length < limit) snips.push(stripHtml(m[1]));
 
+  if (links.length === 0) {
+    log.warn("duckduckgo returned no parseable result links", {
+      query,
+      lastStatus,
+      htmlLength: html.length,
+      looksLikeChallenge: looksLikeDuckDuckGoChallenge(html),
+      title: extractHtmlTitle(html),
+      sample: stripHtml(html).slice(0, 240),
+    });
+  }
+
   return links.map((l, i) => ({ title: l.title, url: l.url, snippet: snips[i] ?? "" }));
+}
+
+function looksLikeDuckDuckGoChallenge(html: string): boolean {
+  return /anomaly|captcha|challenge|vqd|verify you are human/i.test(html);
+}
+
+function extractHtmlTitle(html: string): string {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return match ? stripHtml(match[1]) : "";
 }
 
 function decodeDdgUrl(href: string): string {

@@ -7,8 +7,10 @@ import { webSearch, type SearchResult } from "./search.service.js";
 const log = createLogger("business-discovery");
 
 const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
-const CONTACT_PATHS = ["", "/contact", "/contact-us", "/about", "/about-us", "/team", "/privacy"];
+const CONTACT_PATHS = ["", "/contact", "/contact-us", "/contacts", "/about", "/about-us", "/team", "/privacy"];
 const GENERIC_MAILBOXES = ["info", "contact", "office", "sales", "service", "hello", "support"];
+const PLACEHOLDER_EMAIL_RE = /^(your|you|name|email|test|example|sample|someone|user|admin)@|@(example|domain|email)\./i;
+const WEBMAIL_DOMAINS = new Set(["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com"]);
 const SOCIAL_DOMAINS = new Set([
   "facebook.com",
   "www.facebook.com",
@@ -22,6 +24,20 @@ const SOCIAL_DOMAINS = new Set([
   "www.twitter.com",
   "yelp.com",
   "www.yelp.com",
+]);
+const DIRECTORY_HOSTS = new Set([
+  "angi.com",
+  "www.angi.com",
+  "bbb.org",
+  "www.bbb.org",
+  "enigma.com",
+  "www.enigma.com",
+  "hvacinformed.com",
+  "www.hvacinformed.com",
+  "greaterlawrencechamber.org",
+  "www.greaterlawrencechamber.org",
+  "indianachamber.com",
+  "www.indianachamber.com",
 ]);
 
 export interface BusinessContactDiscoveryParams {
@@ -143,11 +159,12 @@ export async function discoverBusinessContacts(params: BusinessContactDiscoveryP
 async function searchBusinesses(params: BusinessContactDiscoveryParams): Promise<SearchResult[]> {
   const terms = [params.industry, params.location, params.keywords].filter(Boolean).join(" ");
   const queries = [
+    `${terms} official website`,
+    `${terms} "contact" "email" -jobs -directory`,
     `${terms} business website email`,
     `${terms} contact us`,
+    `${terms} "info@" OR "service@"`,
     `${terms} site:facebook.com email`,
-    `${terms} chamber directory`,
-    `${terms} association members`,
   ].filter((q) => q.trim());
 
   const out: SearchResult[] = [];
@@ -175,6 +192,10 @@ function buildCandidates(results: SearchResult[], max: number): BusinessCandidat
       continue;
     }
     const host = hostOf(url);
+    if (isLowQualitySource(url, host)) {
+      log.debug("skipping low-quality business source", { url, host, title: r.title });
+      continue;
+    }
     const company = companyFromResult(r);
     if (!company || company.length < 3) {
       log.debug("skipping result without usable company name", { url, title: r.title });
@@ -183,7 +204,7 @@ function buildCandidates(results: SearchResult[], max: number): BusinessCandidat
     const key = company.toLowerCase();
     const existing = byCompany.get(key);
     const isFacebook = host.endsWith("facebook.com");
-    const website = !isSocialHost(host) ? originOf(url) : undefined;
+    const website = !isSocialHost(host) && !isDirectoryHost(host) ? originOf(url) : undefined;
     const candidate: BusinessCandidate = existing ?? {
       company,
       sourceUrl: url,
@@ -201,7 +222,9 @@ function buildCandidates(results: SearchResult[], max: number): BusinessCandidat
     });
     if (byCompany.size >= max) break;
   }
-  return [...byCompany.values()];
+  return [...byCompany.values()]
+    .sort((a, b) => candidateScore(b) - candidateScore(a))
+    .slice(0, max);
 }
 
 async function findContactForBusiness(
@@ -304,7 +327,7 @@ async function findContactForBusiness(
     log.info("no official website found for candidate", { company: candidate.company, sourceUrl: candidate.sourceUrl });
   }
 
-  return dedupeContacts(contacts);
+  return dedupeContacts(contacts).sort((a, b) => contactScore(b) - contactScore(a));
 }
 
 async function findOfficialWebsite(candidate: BusinessCandidate): Promise<string | undefined> {
@@ -432,6 +455,7 @@ function cleanEmail(email: string): string {
   const cleaned = email.toLowerCase().replace(/^mailto:/, "").replace(/[),.;:'"\]>]+$/g, "");
   if (/\.(png|jpg|jpeg|gif|svg|webp)$/i.test(cleaned)) return "";
   if (cleaned.includes("@example.")) return "";
+  if (PLACEHOLDER_EMAIL_RE.test(cleaned)) return "";
   return cleaned;
 }
 
@@ -450,12 +474,61 @@ function extractSocialUrls(html: string, baseUrl: string): string[] {
 function companyFromResult(result: SearchResult): string {
   const title = stripHtml(result.title)
     .split(/\s[-|–]\s/)[0]
-    .replace(/\b(home|official site|facebook|linkedin|instagram|contact us)\b/gi, "")
+    .replace(/\.\.\.$/, "")
+    .replace(/\b(home|official site|facebook|linkedin|instagram|contact us|near me)\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
-  if (title && !/^http/i.test(title)) return title.slice(0, 120);
   const host = hostOf(result.url).replace(/^www\./, "");
-  return host.split(".")[0].replace(/[-_]/g, " ");
+  if (title && !/^http/i.test(title) && !isGenericBusinessTitle(title)) return title.slice(0, 120);
+  return domainToCompany(host);
+}
+
+function domainToCompany(host: string): string {
+  return host
+    .split(".")[0]
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function isGenericBusinessTitle(title: string): boolean {
+  return /\b(hvac|air conditioning|heating|cooling|contractor|service|services|installation|repair|near me|business directory|directory search|companies|needed|looking for|who can|does anyone|how to find)\b/i.test(title);
+}
+
+function isLowQualitySource(url: string, host: string): boolean {
+  const path = new URL(url).pathname.toLowerCase();
+  if (isDirectoryHost(host)) return true;
+  if (host.endsWith("facebook.com") && (/\/groups\//.test(path) || /\/posts\//.test(path))) return true;
+  return false;
+}
+
+function isDirectoryHost(host: string): boolean {
+  return DIRECTORY_HOSTS.has(host) || [...DIRECTORY_HOSTS].some((d) => host.endsWith(`.${d}`));
+}
+
+function candidateScore(candidate: BusinessCandidate): number {
+  let score = 0;
+  if (candidate.website) score += 10;
+  if (candidate.facebookUrl) score += 2;
+  if (candidate.snippet) score += 1;
+  if (isGenericBusinessTitle(candidate.company)) score -= 4;
+  return score;
+}
+
+function contactScore(contact: BusinessContactLead): number {
+  let score = 0;
+  if (contact.confidence === "direct_found") score += 10;
+  if (contact.confidence === "snippet_found") score += 6;
+  if (contact.confidence === "guessed") score += 2;
+  if (contact.verdict === "valid") score += 6;
+  if (contact.verdict === "unverified") score += 3;
+  if (contact.verdict === "guessed") score += 1;
+  if (contact.website) {
+    const emailDomain = contact.email.split("@")[1];
+    const websiteDomain = hostOf(contact.website).replace(/^www\./, "");
+    if (emailDomain === websiteDomain) score += 5;
+  }
+  if (WEBMAIL_DOMAINS.has(contact.email.split("@")[1])) score -= 2;
+  return score;
 }
 
 function dedupeResults(results: SearchResult[]): SearchResult[] {

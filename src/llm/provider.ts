@@ -51,6 +51,7 @@ export class LLMClient {
       temperature: opts.temperature ?? 0.7,
       ...this.maxTokenParam(opts.maxTokens ?? DEFAULT_MAX_TOKENS),
     } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
+    this.logUsage("complete", res.usage);
     return res.choices[0]?.message?.content?.trim() ?? "";
   }
 
@@ -72,6 +73,7 @@ export class LLMClient {
       temperature: opts.temperature ?? 0.4,
       ...this.maxTokenParam(opts.maxTokens ?? DEFAULT_MAX_TOKENS),
     } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
+    this.logUsage("chatWithTools", res.usage);
     return res.choices[0]?.message ?? { role: "assistant", content: "" };
   }
 
@@ -92,6 +94,7 @@ export class LLMClient {
       ...this.maxTokenParam(opts.maxTokens ?? DEFAULT_MAX_TOKENS),
       response_format: { type: "json_object" },
     } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
+    this.logUsage("completeJSON", res.usage);
     const raw = res.choices[0]?.message?.content ?? "";
     return parseJSONLoose<T>(raw);
   }
@@ -103,6 +106,19 @@ export class LLMClient {
 
   private usesOpenAINewTokenParam(): boolean {
     return this.baseURL.includes("api.openai.com") || /^(gpt-5|o\d|o-|chatgpt-)/i.test(this.model);
+  }
+
+  private logUsage(method: string, usage: OpenAI.Completions.CompletionUsage | undefined): void {
+    if (!usage) {
+      this.log.debug(`${method} token usage unavailable`, { model: this.model });
+      return;
+    }
+    this.log.info(`${method} token usage`, {
+      model: this.model,
+      promptTokens: usage.prompt_tokens,
+      completionTokens: usage.completion_tokens,
+      totalTokens: usage.total_tokens,
+    });
   }
 }
 
