@@ -23,6 +23,7 @@ import { generateVariants, variantLeaderboard, pruneVariants, ensureCampaign } f
 import { createVideoForLead, produceVideo } from "../services/video.service.js";
 import { researchLead } from "../services/research.service.js";
 import { sourceLeadsFromApollo } from "../services/apollo.service.js";
+import { sourceLeadsFromApify } from "../services/apify.service.js";
 import { discoverLeads } from "../services/discovery.service.js";
 import { discoverBusinessContacts, discoverContractors } from "../services/business-discovery.service.js";
 import { buildCrmSnapshot, toCsv, printCrmTable } from "../services/crm.service.js";
@@ -327,6 +328,22 @@ async function cmdSourceLeads(p: Parsed) {
   for (const l of r.imported) log.info(`  ${l.email} — ${l.name ?? ""} @ ${l.company ?? ""}`);
 }
 
+async function cmdSourceLeadsApify(p: Parsed) {
+  const r = await sourceLeadsFromApify({
+    companyCountry: csv(p.flags["company-country"]),
+    companyEmployeeSize: csv(p.flags["company-size"]),
+    contactEmailStatus: str(p.flags["email-status"], "verified"),
+    includeEmails: true,
+    industry: csv(p.flags.industries),
+    personCountry: csv(p.flags["person-country"]),
+    personTitle: csv(p.flags.titles),
+    totalResults: int(p.flags.limit, 100),
+  });
+  log.info(`apify run ${r.runId}: found ${r.found}, imported ${r.imported.length}, cost=$${r.costUsd ?? "unknown"}`);
+  for (const l of r.imported.slice(0, 25)) log.info(`  ${l.email} — ${l.name ?? ""} @ ${l.company ?? ""}`);
+  if (r.imported.length > 25) log.info(`  ...and ${r.imported.length - 25} more`);
+}
+
 async function cmdDiscoverLeads(p: Parsed) {
   const r = await discoverLeads({
     role: str(p.flags.role) || undefined,
@@ -459,6 +476,7 @@ const HELP = `AI SDR CLI
   crm-export [--file leads.csv]                         export full CRM to CSV (default: crm-export.csv)
   verify-email --email <e> | --first --last --domain    check deliverability (MX + SMTP)
   source-leads --titles "VP Ops,COO" --industries "Healthcare" [--keywords] [--limit]   Apollo (paid)
+  source-leads-apify [--limit 30000] [--titles "..."] [--industries "..."]   Apify actor (paid)
   research --email <e>          web-research a lead + save hooks
   approvals                     list pending approvals
   approve <id> | deny <id>      decide a pending approval
@@ -499,6 +517,7 @@ async function run() {
     case "crm-export": await cmdCrmExport(p); break;
     case "verify-email": await cmdVerifyEmail(p); break;
     case "source-leads": await cmdSourceLeads(p); break;
+    case "source-leads-apify": await cmdSourceLeadsApify(p); break;
     case "research": await cmdResearch(p); break;
     case "approvals": await cmdApprovals(); break;
     case "approve": await cmdApprove(p); break;

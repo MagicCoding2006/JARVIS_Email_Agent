@@ -3,6 +3,7 @@ import { LeadsRepo, EventsRepo } from "../../repositories/index.js";
 import { webSearch } from "../../services/search.service.js";
 import { researchLead } from "../../services/research.service.js";
 import { sourceLeadsFromApollo } from "../../services/apollo.service.js";
+import { sourceLeadsFromApify } from "../../services/apify.service.js";
 import { discoverLeads } from "../../services/discovery.service.js";
 import { discoverBusinessContacts } from "../../services/business-discovery.service.js";
 import { emailCandidates, verifyBestEmail } from "../../lib/email-verify.js";
@@ -126,6 +127,38 @@ export const sourceLeads: Tool = {
   async run(args: { titles?: string[]; industries?: string[]; keywords?: string; limit?: number }) {
     const { imported, found } = await sourceLeadsFromApollo(args);
     return { found, imported: imported.length, emails: imported.map((l) => l.email) };
+  },
+};
+
+export const sourceLeadsApify: Tool = {
+  name: "source_leads_apify",
+  description:
+    "Run the configured Apify leads actor and import verified-email leads from its dataset. PAID/HIGH RISK: starts a paid actor run and imports leads.",
+  risk: "high",
+  parameters: schema(
+    {
+      titles: { type: "array", items: { type: "string" }, description: "Person titles, e.g. ['owner','CEO','founder']" },
+      industries: { type: "array", items: { type: "string" }, description: "Company industries" },
+      companyEmployeeSize: { type: "array", items: { type: "string" }, description: "e.g. ['0 - 1','2 - 10']" },
+      totalResults: { type: "number", description: "Requested results, capped by APIFY_MAX_RESULTS_PER_RUN" },
+    },
+    [],
+  ),
+  async run(args: { titles?: string[]; industries?: string[]; companyEmployeeSize?: string[]; totalResults?: number }) {
+    const r = await sourceLeadsFromApify({
+      personTitle: args.titles,
+      industry: args.industries,
+      companyEmployeeSize: args.companyEmployeeSize,
+      totalResults: args.totalResults,
+    });
+    return {
+      runId: r.runId,
+      datasetId: r.datasetId,
+      found: r.found,
+      imported: r.imported.length,
+      costUsd: r.costUsd,
+      emails: r.imported.slice(0, 50).map((l) => l.email),
+    };
   },
 };
 

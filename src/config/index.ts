@@ -102,6 +102,13 @@ export const config = {
   apollo: {
     apiKey: opt("APOLLO_API_KEY"),
   },
+  apify: {
+    apiToken: opt("APIFY_API_TOKEN"),
+    actorId: opt("APIFY_LEADS_ACTOR_ID", "peakydev/leads-scraper-ppe"),
+    maxResultsPerRun: num("APIFY_MAX_RESULTS_PER_RUN", 30000),
+    maxCostPerRunUsd: num("APIFY_MAX_COST_PER_RUN_USD", 30),
+    pollSeconds: num("APIFY_POLL_SECONDS", 10),
+  },
   discovery: {
     // SMTP-probe verification: best-effort (many ISPs block port 25 outbound).
     smtpProbe: bool("DISCOVERY_SMTP_PROBE", true),

@@ -11,6 +11,7 @@ import {
   discoverBusinessContactLeads,
   verifyEmail,
   sourceLeads,
+  sourceLeadsApify,
 } from "./lead.tools.js";
 
 const TOOLS: Tool[] = [
@@ -36,6 +37,7 @@ const TOOLS: Tool[] = [
   discover,
   discoverBusinessContactLeads,
   sourceLeads,
+  sourceLeadsApify,
 ];
 
 const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
