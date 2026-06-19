@@ -2,7 +2,16 @@ import type { Tool } from "./types.js";
 import { getMetrics, getPipelineStatus, getBreakdowns } from "./metrics.tools.js";
 import { listCampaigns, createCampaign, setCampaignStatus, changeOffer, enrollLeads } from "./campaign.tools.js";
 import { genVariants, listVariants, prune } from "./variant.tools.js";
-import { getLead, listHotLeads, search, research, discover, verifyEmail, sourceLeads } from "./lead.tools.js";
+import {
+  getLead,
+  listHotLeads,
+  search,
+  research,
+  discover,
+  discoverBusinessContactLeads,
+  verifyEmail,
+  sourceLeads,
+} from "./lead.tools.js";
 
 const TOOLS: Tool[] = [
   // read-only intelligence
@@ -25,6 +34,7 @@ const TOOLS: Tool[] = [
   changeOffer,
   enrollLeads,
   discover,
+  discoverBusinessContactLeads,
   sourceLeads,
 ];
 

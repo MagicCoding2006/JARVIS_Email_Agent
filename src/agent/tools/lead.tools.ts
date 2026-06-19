@@ -4,6 +4,7 @@ import { webSearch } from "../../services/search.service.js";
 import { researchLead } from "../../services/research.service.js";
 import { sourceLeadsFromApollo } from "../../services/apollo.service.js";
 import { discoverLeads } from "../../services/discovery.service.js";
+import { discoverBusinessContacts } from "../../services/business-discovery.service.js";
 import { emailCandidates, verifyBestEmail } from "../../lib/email-verify.js";
 
 export const getLead: Tool = {
@@ -125,5 +126,39 @@ export const sourceLeads: Tool = {
   async run(args: { titles?: string[]; industries?: string[]; keywords?: string; limit?: number }) {
     const { imported, found } = await sourceLeadsFromApollo(args);
     return { found, imported: imported.length, emails: imported.map((l) => l.email) };
+  },
+};
+
+export const discoverBusinessContactLeads: Tool = {
+  name: "discover_business_contacts",
+  description:
+    "Find local/service businesses from public web search, crawl their official websites/contact pages and public snippets for emails, verify addresses, and import usable leads. HIGH RISK (imports leads you'll email).",
+  risk: "high",
+  parameters: schema(
+    {
+      industry: { type: "string", description: "Business category, e.g. 'HVAC contractors'" },
+      location: { type: "string", description: "City/region, e.g. 'Indianapolis, IN'" },
+      keywords: { type: "string", description: "Extra qualifiers, e.g. 'owner operated emergency service'" },
+      limit: { type: "number", description: "Max leads to import (hard-capped by config)" },
+      importGuessed: { type: "boolean", description: "Import MX-verified but not SMTP-confirmed generic emails" },
+      allowUnverified: { type: "boolean", description: "Import directly found public emails even if verification fails or is inconclusive" },
+    },
+    [],
+  ),
+  async run(args: {
+    industry?: string;
+    location?: string;
+    keywords?: string;
+    limit?: number;
+    importGuessed?: boolean;
+    allowUnverified?: boolean;
+  }) {
+    const r = await discoverBusinessContacts(args);
+    return {
+      searchResults: r.searchResults,
+      businesses: r.candidates,
+      imported: r.imported.length,
+      leads: r.imported,
+    };
   },
 };

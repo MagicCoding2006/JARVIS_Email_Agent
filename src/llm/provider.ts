@@ -13,6 +13,8 @@ export interface CompleteOptions {
   maxTokens?: number;
 }
 
+const DEFAULT_MAX_TOKENS = 10_000;
+
 /**
  * A thin, provider-agnostic wrapper over any OpenAI-compatible chat endpoint.
  * Works for OpenAI (GPT) and GLM/Zhipu (which exposes an OpenAI-compatible API)
@@ -20,12 +22,14 @@ export interface CompleteOptions {
  */
 export class LLMClient {
   private client: OpenAI;
+  private baseURL: string;
   private model: string;
   private label: string;
   private log: ReturnType<typeof createLogger>;
 
   constructor(label: string, cfg: LLMRoleConfig) {
     this.label = label;
+    this.baseURL = cfg.baseURL;
     this.model = cfg.model;
     this.client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey || "missing-key" });
     this.log = createLogger(`llm:${label}`);
@@ -45,8 +49,8 @@ export class LLMClient {
       model: this.model,
       messages,
       temperature: opts.temperature ?? 0.7,
-      max_tokens: opts.maxTokens ?? 1200,
-    });
+      ...this.maxTokenParam(opts.maxTokens ?? DEFAULT_MAX_TOKENS),
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
     return res.choices[0]?.message?.content?.trim() ?? "";
   }
 
@@ -66,8 +70,8 @@ export class LLMClient {
       tools: tools.length ? tools : undefined,
       tool_choice: tools.length ? "auto" : undefined,
       temperature: opts.temperature ?? 0.4,
-      max_tokens: opts.maxTokens ?? 1500,
-    });
+      ...this.maxTokenParam(opts.maxTokens ?? DEFAULT_MAX_TOKENS),
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
     return res.choices[0]?.message ?? { role: "assistant", content: "" };
   }
 
@@ -85,11 +89,20 @@ export class LLMClient {
       model: this.model,
       messages,
       temperature: opts.temperature ?? 0.4,
-      max_tokens: opts.maxTokens ?? 1200,
+      ...this.maxTokenParam(opts.maxTokens ?? DEFAULT_MAX_TOKENS),
       response_format: { type: "json_object" },
-    });
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
     const raw = res.choices[0]?.message?.content ?? "";
     return parseJSONLoose<T>(raw);
+  }
+
+  private maxTokenParam(maxTokens: number): { max_tokens: number } | { max_completion_tokens: number } {
+    if (this.usesOpenAINewTokenParam()) return { max_completion_tokens: maxTokens };
+    return { max_tokens: maxTokens };
+  }
+
+  private usesOpenAINewTokenParam(): boolean {
+    return this.baseURL.includes("api.openai.com") || /^(gpt-5|o\d|o-|chatgpt-)/i.test(this.model);
   }
 }
 

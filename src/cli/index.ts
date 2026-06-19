@@ -24,6 +24,7 @@ import { createVideoForLead, produceVideo } from "../services/video.service.js";
 import { researchLead } from "../services/research.service.js";
 import { sourceLeadsFromApollo } from "../services/apollo.service.js";
 import { discoverLeads } from "../services/discovery.service.js";
+import { discoverBusinessContacts } from "../services/business-discovery.service.js";
 import { emailCandidates, verifyBestEmail } from "../lib/email-verify.js";
 import { handleChat } from "../agent/agent.js";
 import { runAutonomousCycle } from "../workers/autonomous-cycle.js";
@@ -338,6 +339,21 @@ async function cmdDiscoverLeads(p: Parsed) {
   for (const l of r.imported) log.info(`  ${l.email} [${l.verdict}] — ${l.name} @ ${l.company}`);
 }
 
+async function cmdDiscoverBusinessContacts(p: Parsed) {
+  const r = await discoverBusinessContacts({
+    industry: str(p.flags.industry) || undefined,
+    location: str(p.flags.location) || undefined,
+    keywords: str(p.flags.keywords) || undefined,
+    limit: int(p.flags.limit, 10),
+    importGuessed: p.flags["import-guessed"] === true ? true : undefined,
+    allowUnverified: p.flags["allow-unverified"] === true ? true : undefined,
+  });
+  log.info(`${r.searchResults} results → ${r.candidates} businesses → imported ${r.imported.length}`);
+  for (const l of r.imported) {
+    log.info(`  ${l.email} [${l.verdict}/${l.confidence}] — ${l.company} via ${l.evidenceUrl}`);
+  }
+}
+
 async function cmdVerifyEmail(p: Parsed) {
   const email = str(p.flags.email);
   const candidates = email
@@ -407,6 +423,7 @@ const HELP = `AI SDR CLI
   chat --text "..."             ask the GLM agent (uses tools; high-risk = approval)
   agent-cycle                   run the autonomous daily brain now
   discover-leads --role "VP Ops" --industry "Healthcare" [--company --location --keywords --limit]   FREE sourcing
+  discover-businesses --industry "HVAC" --location "Indianapolis, IN" [--keywords --limit --import-guessed --allow-unverified]
   verify-email --email <e> | --first --last --domain    check deliverability (MX + SMTP)
   source-leads --titles "VP Ops,COO" --industries "Healthcare" [--keywords] [--limit]   Apollo (paid)
   research --email <e>          web-research a lead + save hooks
@@ -443,6 +460,7 @@ async function run() {
     case "chat": await cmdChat(p); break;
     case "agent-cycle": await cmdAgentCycle(); break;
     case "discover-leads": await cmdDiscoverLeads(p); break;
+    case "discover-businesses": await cmdDiscoverBusinessContacts(p); break;
     case "verify-email": await cmdVerifyEmail(p); break;
     case "source-leads": await cmdSourceLeads(p); break;
     case "research": await cmdResearch(p); break;
