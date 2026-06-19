@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JARVIS Lead Dashboard</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   body { font-family: 'Segoe UI', system-ui, sans-serif; }
   .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
@@ -149,15 +150,100 @@
     </div>
   </aside>
 
-  <!-- CRM Table -->
+  <!-- Main content (Overview / CRM) -->
   <main class="flex-1 flex flex-col overflow-hidden bg-gray-950">
+
+    <!-- Tab bar -->
+    <div class="px-4 py-2 border-b border-gray-800 flex items-center gap-2 bg-gray-900">
+      <button id="tab-overview" onclick="switchView('overview')"
+        class="text-xs font-semibold rounded px-3 py-1.5 bg-blue-600 text-white transition-colors">📊 Overview</button>
+      <button id="tab-crm" onclick="switchView('crm')"
+        class="text-xs font-semibold rounded px-3 py-1.5 bg-gray-800 text-gray-300 hover:bg-gray-700 transition-colors">📋 CRM</button>
+      <div class="flex-1"></div>
+      <label id="ana-window-wrap" class="text-xs text-gray-500 flex items-center gap-2">
+        Window
+        <select id="ana-window" onchange="loadAnalytics()"
+          class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+          <option value="7">7 days</option>
+          <option value="30" selected>30 days</option>
+          <option value="90">90 days</option>
+          <option value="365">1 year</option>
+        </select>
+      </label>
+    </div>
+
+    <!-- ── Overview view ──────────────────────────────────────────────────── -->
+    <div id="view-overview" class="flex-1 overflow-auto p-4 space-y-4">
+
+      <!-- KPI cards -->
+      <div id="kpi-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3"></div>
+
+      <!-- Activity over time + Funnel -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div class="lg:col-span-2 bg-gray-900 border border-gray-800 rounded-lg p-4">
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Email Activity Over Time</h3>
+          <div style="height:260px"><canvas id="chart-activity"></canvas></div>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Conversion Funnel</h3>
+          <div style="height:260px"><canvas id="chart-funnel"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Status / Source / Score -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Lead Status</h3>
+          <div style="height:240px"><canvas id="chart-status"></canvas></div>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Lead Sources</h3>
+          <div style="height:240px"><canvas id="chart-source"></canvas></div>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Score Distribution</h3>
+          <div style="height:240px"><canvas id="chart-score"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Leads added over time -->
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Leads Added Over Time</h3>
+        <div style="height:220px"><canvas id="chart-leads"></canvas></div>
+      </div>
+
+      <!-- Breakdown tables -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 overflow-x-auto">
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Performance by Industry</h3>
+          <table class="w-full text-xs"><thead id="industry-head"></thead><tbody id="industry-body"></tbody></table>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 overflow-x-auto">
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Performance by Campaign</h3>
+          <table class="w-full text-xs"><thead id="campaign-head"></thead><tbody id="campaign-body"></tbody></table>
+        </div>
+      </div>
+
+      <div id="ana-updated" class="text-xs text-gray-600 mono text-right">—</div>
+    </div>
+
+    <!-- ── CRM view ───────────────────────────────────────────────────────── -->
+    <div id="view-crm" class="flex-1 flex flex-col overflow-hidden hidden">
     <div class="px-4 py-2 border-b border-gray-800 flex items-center gap-3 bg-gray-900">
       <span class="text-xs text-gray-400">CRM</span>
       <span id="crm-count" class="text-xs text-gray-500">loading…</span>
       <div class="flex-1"></div>
-      <input id="crm-filter-input" type="text" placeholder="Filter table…"
+      <!-- Pagination -->
+      <div class="flex items-center gap-1">
+        <button id="page-prev" onclick="changePage(-1)"
+          class="bg-gray-800 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed text-gray-300 rounded px-2 py-1 text-xs transition-colors">‹ Prev</button>
+        <span id="page-indicator" class="text-xs text-gray-500 mono px-1 min-w-[90px] text-center">page 1</span>
+        <button id="page-next" onclick="changePage(1)"
+          class="bg-gray-800 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed text-gray-300 rounded px-2 py-1 text-xs transition-colors">Next ›</button>
+      </div>
+      <input id="crm-filter-input" type="text" placeholder="Search leads…"
         class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white placeholder-gray-600 w-40 focus:outline-none focus:border-blue-500"
-        oninput="applyFilter(this.value)">
+        oninput="onSearchInput(this.value)">
       <span id="crm-refresh" class="text-xs text-gray-600 mono">↻</span>
     </div>
 
@@ -184,6 +270,7 @@
         </tbody>
       </table>
     </div>
+    </div><!-- /view-crm -->
   </main>
 </div>
 
@@ -252,24 +339,32 @@ async function loadStats() {
   }
 }
 
-// ── CRM Table ────────────────────────────────────────────────────────────────
-let allRows = [];
-let crmFilter = '';
+// ── CRM Table (server-side paginated) ────────────────────────────────────────
+const PAGE_SIZE = 50;
+let crmPage = 1;       // 1-based current page
+let crmTotalPages = 1;
+let crmTotal = 0;
+let crmSearch = '';
 let prevEmails = new Set();
+let searchTimer = null;
 
 function statusPill(s) {
   return `<span class="pill pill-${s}">${s}</span>`;
 }
 
-function renderCrm(rows) {
+function renderCrm(rows, highlightNew) {
   const tbody = document.getElementById('crm-tbody');
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="10" class="text-center py-12 text-gray-600">No leads yet — use Find Leads to get started.</td></tr>`;
+    const msg = crmSearch ? 'No leads match your search.' : 'No leads yet — use Find Leads to get started.';
+    tbody.innerHTML = `<tr><td colspan="10" class="text-center py-12 text-gray-600">${msg}</td></tr>`;
+    prevEmails = new Set();
     return;
   }
   const newEmails = new Set(rows.map(r => r.email));
   tbody.innerHTML = rows.map(r => {
-    const isNew = !prevEmails.has(r.email) && prevEmails.size > 0;
+    // Only flash rows that genuinely appeared during a same-page auto-refresh,
+    // not when paging or searching (where every row is "new").
+    const isNew = highlightNew && !prevEmails.has(r.email) && prevEmails.size > 0;
     return `<tr class="${isNew ? 'new-lead' : ''} border-b border-gray-800 hover:bg-gray-900 transition-colors">
       <td class="px-3 py-2 text-blue-300 mono">${r.email}</td>
       <td class="px-3 py-2 text-gray-300 max-w-[140px] truncate" title="${r.company}">${r.company || '—'}</td>
@@ -286,32 +381,53 @@ function renderCrm(rows) {
   prevEmails = newEmails;
 }
 
-function applyFilter(q) {
-  crmFilter = q.toLowerCase();
-  const filtered = crmFilter
-    ? allRows.filter(r =>
-        r.email.toLowerCase().includes(crmFilter) ||
-        (r.company || '').toLowerCase().includes(crmFilter) ||
-        r.status.includes(crmFilter))
-    : allRows;
-  renderCrm(filtered);
+function updatePager(shown) {
+  const start = crmTotal === 0 ? 0 : (crmPage - 1) * PAGE_SIZE + 1;
+  const end = (crmPage - 1) * PAGE_SIZE + shown;
   document.getElementById('crm-count').textContent =
-    filtered.length === allRows.length ? `${allRows.length} leads` : `${filtered.length} of ${allRows.length} leads`;
+    crmTotal === 0 ? '0 leads' : `${start}–${end} of ${crmTotal} leads`;
+  document.getElementById('page-indicator').textContent = `page ${crmPage} / ${crmTotalPages}`;
+  document.getElementById('page-prev').disabled = crmPage <= 1;
+  document.getElementById('page-next').disabled = crmPage >= crmTotalPages;
 }
 
+// Typing in the search box: reset to page 1 and reload (debounced).
+function onSearchInput(q) {
+  crmSearch = q.trim();
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { crmPage = 1; loadCrm(); }, 300);
+}
+
+// Clicking a stat card filters by status via the search box.
 function filterCrm(status) {
   document.getElementById('crm-filter-input').value = status;
-  applyFilter(status);
+  crmSearch = status;
+  crmPage = 1;
+  loadCrm();
 }
 
-async function loadCrm() {
+function changePage(delta) {
+  const next = crmPage + delta;
+  if (next < 1 || next > crmTotalPages) return;
+  crmPage = next;
+  loadCrm();
+}
+
+async function loadCrm(highlightNew = false) {
   const indicator = document.getElementById('crm-refresh');
   try {
     indicator.textContent = '↻';
-    const r = await fetch('./api/crm');
+    const params = new URLSearchParams({ page: crmPage, pageSize: PAGE_SIZE });
+    if (crmSearch) params.set('search', crmSearch);
+    const r = await fetch('./api/crm?' + params.toString());
     if (!r.ok) throw new Error(r.status);
-    allRows = await r.json();
-    applyFilter(crmFilter);
+    const d = await r.json();
+    crmTotal = d.total;
+    crmTotalPages = d.totalPages;
+    // A page can fall out of range after deletes/filtering — clamp and refetch.
+    if (crmPage > crmTotalPages) { crmPage = crmTotalPages; return loadCrm(highlightNew); }
+    renderCrm(d.rows, highlightNew);
+    updatePager(d.rows.length);
     indicator.textContent = '✓ ' + new Date().toLocaleTimeString();
   } catch {
     indicator.textContent = '✗ error';
@@ -447,13 +563,164 @@ document.getElementById('discover-form').addEventListener('submit', async (e) =>
   loadCrm(); loadStats();
 });
 
+// ── Analytics / Overview ─────────────────────────────────────────────────────
+let currentView = 'overview';
+const charts = {};
+
+const PALETTE = ['#60a5fa','#34d399','#c084fc','#f87171','#fbbf24','#22d3ee','#fb923c','#a3e635','#f472b6','#94a3b8'];
+const STATUS_COLORS = {
+  new:'#9ca3af', active:'#60a5fa', replied:'#c084fc', meeting:'#34d399', won:'#10b981',
+  lost:'#f87171', bounced:'#fb923c', unsubscribed:'#6b7280', do_not_contact:'#ef4444',
+};
+
+Chart.defaults.color = '#9ca3af';
+Chart.defaults.borderColor = '#1f2937';
+Chart.defaults.font.size = 11;
+
+function switchView(view) {
+  currentView = view;
+  document.getElementById('view-overview').classList.toggle('hidden', view !== 'overview');
+  document.getElementById('view-crm').classList.toggle('hidden', view !== 'crm');
+  document.getElementById('ana-window-wrap').style.visibility = view === 'overview' ? 'visible' : 'hidden';
+  for (const [id, active] of [['tab-overview', view==='overview'], ['tab-crm', view==='crm']]) {
+    document.getElementById(id).className =
+      `text-xs font-semibold rounded px-3 py-1.5 transition-colors ${active ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`;
+  }
+  if (view === 'overview') loadAnalytics();
+}
+
+function upsertChart(id, config) {
+  if (charts[id]) { charts[id].destroy(); }
+  charts[id] = new Chart(document.getElementById(id), config);
+}
+
+function kpiCard(label, value, sub, accent) {
+  return `<div class="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
+    <div class="text-[10px] text-gray-500 uppercase tracking-wider">${label}</div>
+    <div class="text-2xl font-bold ${accent || 'text-white'}">${value}</div>
+    <div class="text-[11px] text-gray-500">${sub || ''}</div>
+  </div>`;
+}
+
+function renderKpis(k) {
+  document.getElementById('kpi-grid').innerHTML = [
+    kpiCard('Sent', k.sent, `last ${Math.round(k.windowHours/24)}d`, 'text-white'),
+    kpiCard('Open Rate', k.openRate + '%', `${k.opens} opens`, 'text-blue-400'),
+    kpiCard('Click Rate', k.clickRate + '%', `${k.clicks} clicks`, 'text-purple-400'),
+    kpiCard('Reply Rate', k.replyRate + '%', `${k.replies} replies`, 'text-emerald-400'),
+    kpiCard('Meetings', k.meetings, `${k.positiveReplies} positive`, 'text-green-400'),
+    kpiCard('Bounces', k.bounces, `${k.unsubscribes} unsubs`, 'text-orange-400'),
+  ].join('');
+}
+
+function renderBreakdownTable(headId, bodyId, rows) {
+  document.getElementById(headId).innerHTML =
+    `<tr class="text-gray-500 border-b border-gray-800">
+      <th class="text-left py-1 pr-2">Name</th><th class="text-right py-1 px-2">Sent</th>
+      <th class="text-right py-1 px-2">Reply%</th><th class="text-right py-1 px-2">Pos%</th>
+      <th class="text-right py-1 pl-2">Mtg</th></tr>`;
+  const body = document.getElementById(bodyId);
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-600">No data in this window.</td></tr>`; return; }
+  body.innerHTML = rows.slice(0, 10).map(r => `<tr class="border-b border-gray-800/60">
+    <td class="py-1 pr-2 text-gray-300 truncate max-w-[160px]" title="${r.bucket}">${r.bucket || '(unknown)'}</td>
+    <td class="py-1 px-2 text-right text-gray-400">${r.sent}</td>
+    <td class="py-1 px-2 text-right text-emerald-400">${r.replyRate}%</td>
+    <td class="py-1 px-2 text-right text-blue-400">${r.positiveRate}%</td>
+    <td class="py-1 pl-2 text-right text-green-400">${r.meetings || '—'}</td>
+  </tr>`).join('');
+}
+
+const noGridX = { grid: { display: false } };
+const baseScales = { x: { ...noGridX, ticks: { maxRotation: 0, autoSkip: true } }, y: { beginAtZero: true } };
+
+function renderCharts(d) {
+  const labels = d.timeseries.map(p => p.day.slice(5)); // MM-DD
+  upsertChart('chart-activity', {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Sent',    data: d.timeseries.map(p=>p.sent),    borderColor:'#60a5fa', backgroundColor:'#60a5fa22', tension:.3, fill:true },
+      { label: 'Opens',   data: d.timeseries.map(p=>p.opens),   borderColor:'#34d399', tension:.3 },
+      { label: 'Clicks',  data: d.timeseries.map(p=>p.clicks),  borderColor:'#c084fc', tension:.3 },
+      { label: 'Replies', data: d.timeseries.map(p=>p.replies), borderColor:'#fbbf24', tension:.3 },
+    ]},
+    options: { responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+      plugins:{legend:{labels:{boxWidth:10}}}, scales: baseScales }
+  });
+
+  const f = d.funnel;
+  upsertChart('chart-funnel', {
+    type: 'bar',
+    data: { labels:['Leads','Contacted','Opened','Clicked','Replied','Meeting','Won'],
+      datasets:[{ data:[f.leads,f.contacted,f.opened,f.clicked,f.replied,f.meetings,f.won],
+        backgroundColor:['#475569','#60a5fa','#34d399','#c084fc','#fbbf24','#10b981','#22c55e'] }] },
+    options: { indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}}, scales:{ x:{beginAtZero:true}, y:noGridX } }
+  });
+
+  upsertChart('chart-status', {
+    type: 'doughnut',
+    data: { labels: d.statusBreakdown.map(s=>s.name),
+      datasets:[{ data:d.statusBreakdown.map(s=>s.n),
+        backgroundColor:d.statusBreakdown.map(s=>STATUS_COLORS[s.name]||'#64748b'), borderWidth:0 }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{boxWidth:10}}} }
+  });
+
+  upsertChart('chart-source', {
+    type: 'bar',
+    data: { labels: d.sourceBreakdown.map(s=>s.name),
+      datasets:[{ data:d.sourceBreakdown.map(s=>s.n), backgroundColor:PALETTE }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ x:noGridX, y:{beginAtZero:true} } }
+  });
+
+  upsertChart('chart-score', {
+    type: 'bar',
+    data: { labels: d.scoreBuckets.map(s=>s.name),
+      datasets:[{ data:d.scoreBuckets.map(s=>s.n),
+        backgroundColor:['#64748b','#94a3b8','#fbbf24','#fb923c','#f87171'] }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ x:noGridX, y:{beginAtZero:true} } }
+  });
+
+  upsertChart('chart-leads', {
+    type: 'bar',
+    data: { labels: d.leadsAdded.map(p=>p.day.slice(5)),
+      datasets:[{ label:'Leads added', data:d.leadsAdded.map(p=>p.n), backgroundColor:'#60a5fa' }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales: baseScales }
+  });
+
+  renderBreakdownTable('industry-head','industry-body', d.industry);
+  renderBreakdownTable('campaign-head','campaign-body', d.campaigns);
+}
+
+let analyticsLoading = false;
+async function loadAnalytics() {
+  if (analyticsLoading) return;
+  analyticsLoading = true;
+  const days = document.getElementById('ana-window').value;
+  try {
+    const r = await fetch('./api/analytics?days=' + days);
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    renderKpis(d.kpis);
+    renderCharts(d);
+    document.getElementById('ana-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('ana-updated').textContent = '✗ failed to load analytics';
+  } finally {
+    analyticsLoading = false;
+  }
+}
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 loadStats();
 loadCrm();
 loadCampaigns();
+loadAnalytics();
 setInterval(loadStats, 8000);
-setInterval(loadCrm,   4000);
+setInterval(() => { if (currentView === 'crm') loadCrm(true); }, 4000);
 setInterval(loadCampaigns, 30000);
+setInterval(() => { if (currentView === 'overview') loadAnalytics(); }, 30000);
 </script>
 </body>
 </html>

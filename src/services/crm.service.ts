@@ -23,76 +23,145 @@ export interface CrmRow {
   addedAt: string;
 }
 
+interface EventStats {
+  _id: string;
+  sent: number;
+  opens: number;
+  clicks: number;
+  replies: number;
+  meetings: number;
+  lastActivity: Date;
+}
+
+/**
+ * Aggregate per-lead event counts in one round-trip. If `leadIds` is given, the
+ * rollup is restricted to those leads (so a single page of the CRM doesn't scan
+ * the entire events collection); omit it to roll up every lead.
+ */
+async function rollupEvents(
+  c: Awaited<ReturnType<typeof getCollections>>,
+  leadIds?: string[],
+): Promise<Map<string, EventStats>> {
+  const pipeline: Record<string, unknown>[] = [];
+  if (leadIds) pipeline.push({ $match: { leadId: { $in: leadIds } } });
+  pipeline.push({
+    $group: {
+      _id: "$leadId",
+      sent: { $sum: { $cond: [{ $eq: ["$type", "sent"] }, 1, 0] } },
+      opens: { $sum: { $cond: [{ $eq: ["$type", "open"] }, 1, 0] } },
+      clicks: { $sum: { $cond: [{ $eq: ["$type", "click"] }, 1, 0] } },
+      replies: {
+        $sum: {
+          $cond: [
+            {
+              $in: [
+                "$type",
+                ["reply", "positive_reply", "negative_reply", "neutral_reply", "request_info"],
+              ],
+            },
+            1,
+            0,
+          ],
+        },
+      },
+      meetings: { $sum: { $cond: [{ $eq: ["$type", "booked"] }, 1, 0] } },
+      lastActivity: { $max: "$timestamp" },
+    },
+  });
+  const rollup = await c.events.aggregate<EventStats>(pipeline).toArray();
+  return new Map(rollup.map((r) => [r._id, r]));
+}
+
+function toCrmRow(lead: Lead, stats?: EventStats): CrmRow {
+  return {
+    email: lead.email,
+    name: lead.name ?? "",
+    company: lead.company ?? "",
+    title: lead.title ?? "",
+    industry: lead.industry ?? "",
+    website: lead.website ?? "",
+    status: lead.status,
+    score: lead.score,
+    emailsSent: stats?.sent ?? 0,
+    opens: stats?.opens ?? 0,
+    clicks: stats?.clicks ?? 0,
+    replies: stats?.replies ?? 0,
+    meetings: stats?.meetings ?? 0,
+    lastActivity: stats?.lastActivity ? stats.lastActivity.toISOString() : "",
+    source: lead.source ?? "",
+    addedAt: lead.createdAt.toISOString(),
+  };
+}
+
 /**
  * Build a CRM snapshot: every lead joined with their lifetime event stats.
- * Runs two aggregations (leads + event rollup) and merges them in memory.
+ * Used for full exports (CSV / CLI). For the dashboard table use
+ * {@link buildCrmPage}, which paginates instead of loading every lead.
  */
 export async function buildCrmSnapshot(): Promise<CrmRow[]> {
   const c = await getCollections();
-
   const leads = await c.leads.find({}).sort({ score: -1 }).toArray();
+  const statsMap = await rollupEvents(c);
+  return leads.map((lead: Lead) => toCrmRow(lead, statsMap.get(lead._id)));
+}
 
-  // Aggregate event counts per lead in one round-trip.
-  const eventRollup = await c.events
-    .aggregate<{
-      _id: string;
-      sent: number;
-      opens: number;
-      clicks: number;
-      replies: number;
-      meetings: number;
-      lastActivity: Date;
-    }>([
-      {
-        $group: {
-          _id: "$leadId",
-          sent: { $sum: { $cond: [{ $eq: ["$type", "sent"] }, 1, 0] } },
-          opens: { $sum: { $cond: [{ $eq: ["$type", "open"] }, 1, 0] } },
-          clicks: { $sum: { $cond: [{ $eq: ["$type", "click"] }, 1, 0] } },
-          replies: {
-            $sum: {
-              $cond: [
-                {
-                  $in: [
-                    "$type",
-                    ["reply", "positive_reply", "negative_reply", "neutral_reply", "request_info"],
-                  ],
-                },
-                1,
-                0,
-              ],
-            },
-          },
-          meetings: { $sum: { $cond: [{ $eq: ["$type", "booked"] }, 1, 0] } },
-          lastActivity: { $max: "$timestamp" },
-        },
-      },
-    ])
+export interface CrmPageQuery {
+  page?: number;
+  pageSize?: number;
+  status?: string;
+  search?: string;
+}
+
+export interface CrmPageResult {
+  rows: CrmRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Build one page of the CRM, sorted by score. Filtering (status + free-text
+ * search across email/company/name/status) and pagination happen in MongoDB, so
+ * only `pageSize` leads — and only the events for those leads — are ever loaded.
+ */
+export async function buildCrmPage(q: CrmPageQuery = {}): Promise<CrmPageResult> {
+  const c = await getCollections();
+
+  const page = Math.max(1, Math.floor(q.page ?? 1));
+  const pageSize = Math.min(200, Math.max(1, Math.floor(q.pageSize ?? 50)));
+
+  const filter: Record<string, unknown> = {};
+  if (q.status && q.status.trim()) filter.status = q.status.trim();
+  if (q.search && q.search.trim()) {
+    const rx = new RegExp(escapeRegex(q.search.trim()), "i");
+    filter.$or = [{ email: rx }, { company: rx }, { name: rx }, { status: rx }];
+  }
+
+  const total = await c.leads.countDocuments(filter);
+  const leads = await c.leads
+    .find(filter)
+    .sort({ score: -1, _id: 1 })
+    .skip((page - 1) * pageSize)
+    .limit(pageSize)
     .toArray();
 
-  const statsMap = new Map(eventRollup.map((r) => [r._id, r]));
+  const statsMap = await rollupEvents(
+    c,
+    leads.map((l: Lead) => l._id),
+  );
 
-  return leads.map((lead: Lead): CrmRow => {
-    const stats = statsMap.get(lead._id);
-    return {
-      email: lead.email,
-      name: lead.name ?? "",
-      company: lead.company ?? "",
-      title: lead.title ?? "",
-      industry: lead.industry ?? "",
-      website: lead.website ?? "",
-      status: lead.status,
-      score: lead.score,
-      emailsSent: stats?.sent ?? 0,
-      opens: stats?.opens ?? 0,
-      clicks: stats?.clicks ?? 0,
-      replies: stats?.replies ?? 0,
-      meetings: stats?.meetings ?? 0,
-      lastActivity: stats?.lastActivity ? stats.lastActivity.toISOString() : "",
-      source: lead.source ?? "",
-      addedAt: lead.createdAt.toISOString(),
-    };
-  });
+  return {
+    rows: leads.map((lead: Lead) => toCrmRow(lead, statsMap.get(lead._id))),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  };
 }
 
 /** Format a CRM snapshot as a CSV string. */

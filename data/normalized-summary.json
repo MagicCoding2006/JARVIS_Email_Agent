@@ -1,0 +1,50 @@
+{
+  "inputRowsWithEmails": 13525,
+  "normalizedLeads": 11213,
+  "duplicateRows": 1446,
+  "rejectedRows": 6318,
+  "byNiche": {
+    "Construction": 10697,
+    "Consulting": 4,
+    "Design": 1,
+    "Education": 1,
+    "Electrical/electronic Manufacturing": 1,
+    "Facilities Services": 1,
+    "Financial Services": 112,
+    "Healthcare": 80,
+    "Law": 213,
+    "Marketing": 3,
+    "Pharmaceutical": 1,
+    "Real Estate": 80,
+    "Renewables & Environment": 4,
+    "Sports": 1,
+    "Staffing & Recruiting": 5,
+    "Technology": 7,
+    "Travel": 1,
+    "Utilities": 1
+  },
+  "bySubNiche": {
+    "Remodeling / Renovation": 456,
+    "": 8274,
+    "General Contractor": 431,
+    "Roofing": 674,
+    "Paving / Asphalt": 157,
+    "Insurance": 37,
+    "HVAC": 507,
+    "Fire / Safety": 158,
+    "Electrical / Security": 285,
+    "Medical Billing / RCM": 23,
+    "Personal Injury Law": 22,
+    "Medical Devices / Diagnostics": 12,
+    "Travel Agency": 6,
+    "Property / Renovation Investment": 64,
+    "Construction Law": 5,
+    "Real Estate Agent / Team": 7,
+    "Financial Planning": 25,
+    "Family / Mediation Law": 70
+  },
+  "byEmailStatus": {
+    "": 10735,
+    "verified": 478
+  }
+}

@@ -3,7 +3,8 @@ import { spawn } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
-import { buildCrmSnapshot, toCsv } from "../services/crm.service.js";
+import { buildCrmSnapshot, buildCrmPage, toCsv } from "../services/crm.service.js";
+import { buildDashboardAnalytics } from "../services/analytics.service.js";
 import { LeadsRepo, CampaignsRepo } from "../repositories/index.js";
 import { enrollLead } from "../services/sequencer.service.js";
 import { dispatchDue } from "../workers/dispatcher.js";
@@ -50,11 +51,27 @@ export function createDashboardRouter(): Router {
     }
   });
 
-  // ── CRM table data ──────────────────────────────────────────────────────────
-  router.get("/api/crm", async (_req: Request, res: Response) => {
+  // ── CRM table data (paginated) ──────────────────────────────────────────────
+  router.get("/api/crm", async (req: Request, res: Response) => {
     try {
-      const rows = await buildCrmSnapshot();
-      res.json(rows);
+      const page = await buildCrmPage({
+        page: Number(req.query.page) || 1,
+        pageSize: Number(req.query.pageSize) || 50,
+        status: typeof req.query.status === "string" ? req.query.status : undefined,
+        search: typeof req.query.search === "string" ? req.query.search : undefined,
+      });
+      res.json(page);
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // ── Analytics bundle (Overview tab) ─────────────────────────────────────────
+  router.get("/api/analytics", async (req: Request, res: Response) => {
+    try {
+      const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+      const data = await buildDashboardAnalytics(days);
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: String(err) });
     }
