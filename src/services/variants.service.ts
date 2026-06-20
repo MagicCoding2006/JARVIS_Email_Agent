@@ -81,8 +81,11 @@ export async function generateVariants(args: {
   step: number;
   count: number;
   hypotheses?: string[];
+  /** When these variants are testing a specific hypothesis, link them so its
+   *  outcome can be measured later (see experiments.service.ts). */
+  hypothesisId?: string;
 }): Promise<Variant[]> {
-  const { campaign, step, count, hypotheses = [] } = args;
+  const { campaign, step, count, hypotheses = [], hypothesisId } = args;
   if (!worker.configured) {
     log.warn("worker not configured — skipping variant generation");
     return [];
@@ -116,7 +119,7 @@ Make subject lines under 50 chars, CTAs low-friction. Vary tone meaningfully acr
       cta: v.cta,
       tone: v.tone,
       industry: undefined,
-      hypothesisId: undefined,
+      hypothesisId,
     });
     created.push(variant);
   }

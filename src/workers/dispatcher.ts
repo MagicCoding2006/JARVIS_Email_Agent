@@ -3,17 +3,33 @@ import { createLogger } from "../lib/logger.js";
 import { nowInWindow } from "../lib/time.js";
 import { EnrollmentsRepo, EventsRepo, LeadsRepo, MessagesRepo } from "../repositories/index.js";
 import { getSender } from "../services/sender/index.js";
+import {
+  allCapacities,
+  capacityForEmail,
+  getMailboxByEmail,
+  senderForMailbox,
+} from "../services/sender/mailbox.js";
 import { scheduleNextStep } from "../services/sequencer.service.js";
-import type { Message } from "../models/types.js";
+import { trackingUrls } from "../services/tracking.service.js";
+import { checkSendingHealth, type SendingHealth } from "../services/sending-health.service.js";
+import { notify } from "../services/notifications.service.js";
+import type { Lead, Message } from "../models/types.js";
 
 const log = createLogger("dispatcher");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+// Throttle the "sending paused" alert so a sustained pause doesn't spam every run.
+let lastPauseAlertAt = 0;
+async function alertSendingPaused(health: SendingHealth): Promise<void> {
+  if (Date.now() - lastPauseAlertAt < 6 * 3600 * 1000) return;
+  lastPauseAlertAt = Date.now();
+  await notify({
+    kind: "sending_paused",
+    level: "important",
+    title: "⚠️ Sending paused — high bounce rate",
+    body: `${health.reason}. Auto-paused to protect domain reputation. Check recent imports / email verification, then it resumes automatically once the rate drops.`,
+  });
 }
 
 function messageIdHeader(messageId: string, fromEmail: string): string {
@@ -21,57 +37,114 @@ function messageIdHeader(messageId: string, fromEmail: string): string {
   return `<${messageId}@${domain}>`;
 }
 
+/**
+ * RFC 8058 one-click unsubscribe headers. Gmail/Yahoo require these for bulk
+ * senders; they also keep complaints out of the spam-report path.
+ */
+function listUnsubscribeHeaders(lead: Lead, fromEmail: string): Record<string, string> {
+  const url = trackingUrls.unsubscribe(lead.unsubscribeToken);
+  return {
+    "List-Unsubscribe": `<${url}>, <mailto:${fromEmail}?subject=unsubscribe>`,
+    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+  };
+}
+
 export interface DispatchOptions {
   /** Ignore the sending window (used for manual/testing runs). */
   ignoreWindow?: boolean;
 }
 
-/**
- * Send all due messages, respecting the sending window and daily/per-run
- * throttles. Each successful send advances the enrollment and schedules the
- * next step. This is the batch send loop — run it on a short cron (e.g. /5min).
- */
-export async function dispatchDue(opts: DispatchOptions = {}): Promise<{
+export interface DispatchResult {
   sent: number;
   skipped: number;
   failed: number;
-}> {
+  /** Due messages held back because their mailbox hit its warmup/daily cap. */
+  deferred: number;
+}
+
+/**
+ * Send all due messages, respecting the sending window and each mailbox's
+ * warmup-adjusted daily cap. Sends rotate across the mailbox pool (every
+ * prospect has a sticky mailbox), and a message whose mailbox is at cap is left
+ * scheduled for a later run. Run on a short cron (e.g. /5min).
+ */
+export async function dispatchDue(opts: DispatchOptions = {}): Promise<DispatchResult> {
   let sent = 0;
   let skipped = 0;
   let failed = 0;
+  let deferred = 0;
 
   if (!opts.ignoreWindow && !nowInWindow()) {
     log.debug("outside sending window — skipping dispatch");
-    return { sent, skipped, failed };
+    return { sent, skipped, failed, deferred };
   }
 
-  const sentToday = await MessagesRepo.countSentSince(startOfToday());
-  const remainingDaily = config.sending.dailyLimit - sentToday;
-  if (remainingDaily <= 0) {
-    log.info(`daily send limit reached (${config.sending.dailyLimit})`);
-    return { sent, skipped, failed };
-  }
+  const dryRun = config.sending.dryRun;
 
-  const batchSize = Math.min(config.sending.maxPerRun, remainingDaily);
-  const due = await MessagesRepo.getDue(batchSize);
-  if (!due.length) return { sent, skipped, failed };
-
-  const sender = getSender();
-  log.info(`dispatching ${due.length} due message(s) via ${sender.name}`);
-
-  for (const msg of due) {
-    const ok = await sendOne(msg);
-    if (ok === "sent") sent++;
-    else if (ok === "skipped") skipped++;
-    else failed++;
-
-    if (ok === "sent" && !config.sending.dryRun) {
-      await sleep(config.sending.minSecondsBetweenSends * 1000);
+  // Reputation guard: stop sending if the recent bounce rate has spiked.
+  if (!dryRun) {
+    const health = await checkSendingHealth();
+    if (!health.healthy) {
+      log.warn(`dispatch paused — ${health.reason}`);
+      await alertSendingPaused(health);
+      return { sent, skipped, failed, deferred };
     }
   }
 
-  log.info(`dispatch complete: ${sent} sent, ${skipped} skipped, ${failed} failed`);
-  return { sent, skipped, failed };
+  // Remaining capacity per mailbox today (warmup-adjusted), tracked mutably as
+  // we send. Unknown (campaign-pinned) from-addresses are filled in lazily.
+  const remaining = new Map<string, number>();
+  let totalRemaining = 0;
+  if (!dryRun) {
+    for (const [email, cap] of await allCapacities()) {
+      remaining.set(email, cap.remaining);
+      totalRemaining += cap.remaining;
+    }
+    if (totalRemaining <= 0) {
+      log.info("all mailboxes at warmup/daily cap — nothing to send");
+      return { sent, skipped, failed, deferred };
+    }
+  } else {
+    totalRemaining = config.sending.maxPerRun;
+  }
+
+  const batchSize = Math.min(config.sending.maxPerRun, totalRemaining);
+  // Over-fetch: some due messages may be deferred when their mailbox is full.
+  const due = await MessagesRepo.getDue(Math.min(batchSize * 4, 200));
+  if (!due.length) return { sent, skipped, failed, deferred };
+
+  log.info(`dispatching up to ${batchSize} of ${due.length} due message(s)`);
+
+  for (const msg of due) {
+    if (sent >= batchSize) break;
+
+    const key = msg.fromEmail.trim().toLowerCase();
+    if (!dryRun) {
+      if (!remaining.has(key)) remaining.set(key, (await capacityForEmail(key)).remaining);
+      if ((remaining.get(key) ?? 0) <= 0) {
+        deferred++; // leave it scheduled; a later run/day picks it up
+        continue;
+      }
+    }
+
+    const ok = await sendOne(msg);
+    if (ok === "sent") {
+      sent++;
+      if (!dryRun) {
+        remaining.set(key, (remaining.get(key) ?? 1) - 1);
+        await sleep(config.sending.minSecondsBetweenSends * 1000);
+      }
+    } else if (ok === "skipped") {
+      skipped++;
+    } else {
+      failed++;
+    }
+  }
+
+  log.info(
+    `dispatch complete: ${sent} sent, ${skipped} skipped, ${failed} failed, ${deferred} deferred (cap)`,
+  );
+  return { sent, skipped, failed, deferred };
 }
 
 async function sendOne(msg: Message): Promise<"sent" | "skipped" | "failed"> {
@@ -91,18 +164,22 @@ async function sendOne(msg: Message): Promise<"sent" | "skipped" | "failed"> {
   const header = messageIdHeader(msg._id, msg.fromEmail);
 
   try {
-    const sender = getSender();
+    // Route through the assigned mailbox's own transport + identity. In dry-run
+    // mode, or for a from-address outside the roster, fall back to the default.
+    const mailbox = getMailboxByEmail(msg.fromEmail);
+    const sender = config.sending.dryRun || !mailbox ? getSender() : senderForMailbox(mailbox);
     const result = await sender.send({
       to: msg.toEmail,
-      fromName: config.mail.fromName,
+      fromName: mailbox?.fromName ?? config.mail.fromName,
       fromEmail: msg.fromEmail,
-      replyTo: config.mail.replyTo,
+      replyTo: mailbox?.replyTo ?? config.mail.replyTo,
       subject: msg.subject,
       html: msg.bodyHtml,
       text: msg.bodyText,
       messageId: header,
       inReplyTo: msg.inReplyTo,
       references: msg.inReplyTo,
+      headers: listUnsubscribeHeaders(lead, msg.fromEmail),
     });
 
     if (!result.accepted) throw new Error(result.detail || "send not accepted");

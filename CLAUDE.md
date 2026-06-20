@@ -99,6 +99,14 @@ Full layer-by-layer status and the data model are in [ARCHITECTURE.md](./ARCHITE
 
 1. `enroll` → `sequencer.scheduleNextStep` drafts step 1 (worker LLM, optionally
    a selected A/B variant), renders tracked HTML/text, schedules a `Message`.
+   Drafting: by default the worker LLM writes the whole email from the step's
+   angle + thread context (follow-ups get the prior email). If a step sets
+   `bodyTemplate`/`subjectTemplate`, `personalization.service` instead renders a
+   **hybrid template** (`templating.service`): fixed copy with `{{field|default}}`
+   merge slots, `{{ai: instruction}}` (all AI slots filled in ONE batched worker
+   call), and `{{research: task}}` (web search + LLM per slot, capped). Slots
+   degrade to empty when the worker is off. See `examples/templated-sequence.json`;
+   load via `create-campaign --sequence-file`.
 2. `dispatcher` (cron /5m) sends due messages within the window + caps, records
    `sent`, advances the enrollment, schedules the next step.
 3. Prospect opens/clicks/replies/books → the **tracking server** writes `events`.

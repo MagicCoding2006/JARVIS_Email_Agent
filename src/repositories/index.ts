@@ -20,6 +20,7 @@ import type {
   VideoStatus,
   Approval,
   ApprovalStatus,
+  MailboxState,
 } from "../models/types.js";
 
 const now = () => new Date();
@@ -185,6 +186,30 @@ export const CampaignsRepo = {
     const c = await getCollections();
     await c.campaigns.updateOne({ _id: id }, { $set: { ...patch, updatedAt: now() } });
   },
+
+  /**
+   * Set (or clear) the hybrid template on one sequence step. Pass an empty
+   * string to revert a step to fully-AI-written. Returns false if the step
+   * doesn't exist.
+   */
+  async setStepTemplate(
+    campaignId: string,
+    step: number,
+    tpl: { bodyTemplate?: string; subjectTemplate?: string },
+  ): Promise<boolean> {
+    const c = await getCollections();
+    const campaign = await c.campaigns.findOne({ _id: campaignId });
+    if (!campaign || !campaign.sequence.some((s) => s.step === step)) return false;
+    const sequence = campaign.sequence.map((s) => {
+      if (s.step !== step) return s;
+      const next = { ...s };
+      if (tpl.bodyTemplate !== undefined) next.bodyTemplate = tpl.bodyTemplate || undefined;
+      if (tpl.subjectTemplate !== undefined) next.subjectTemplate = tpl.subjectTemplate || undefined;
+      return next;
+    });
+    await c.campaigns.updateOne({ _id: campaignId }, { $set: { sequence, updatedAt: now() } });
+    return true;
+  },
 };
 
 // ── Enrollments ──────────────────────────────────────────────────────────────
@@ -231,6 +256,15 @@ export const EnrollmentsRepo = {
     await c.enrollments.updateOne(
       { _id: id },
       { $set: { status, stopReason, updatedAt: now() } },
+    );
+  },
+
+  /** Pin the sticky sending mailbox for this enrollment (set once, on step 1). */
+  async setMailbox(id: string, email: string): Promise<void> {
+    const c = await getCollections();
+    await c.enrollments.updateOne(
+      { _id: id },
+      { $set: { assignedMailbox: email, updatedAt: now() } },
     );
   },
 
@@ -286,6 +320,13 @@ export const MessagesRepo = {
     return c.messages.findOne({ "links.linkId": linkId });
   },
 
+  /** Find a sent message by its RFC822 Message-ID header — maps an inbound
+   *  reply's In-Reply-To/References back to the touch it answers. */
+  async findByMessageIdHeader(header: string): Promise<Message | null> {
+    const c = await getCollections();
+    return c.messages.findOne({ messageIdHeader: header });
+  },
+
   /** Most recent SENT message for an enrollment — used to thread follow-ups. */
   async lastSentForEnrollment(enrollmentId: string): Promise<Message | null> {
     const c = await getCollections();
@@ -301,6 +342,23 @@ export const MessagesRepo = {
     return c.messages.countDocuments({ status: "sent", sentAt: { $gte: since } });
   },
 
+  /** Count messages sent since `since` from a specific mailbox (warmup cap accounting). */
+  async countSentSinceFrom(since: Date, fromEmail: string): Promise<number> {
+    const c = await getCollections();
+    return c.messages.countDocuments({ status: "sent", sentAt: { $gte: since }, fromEmail });
+  },
+
+  /** Timestamp of the first send ever from a mailbox — anchors the warmup ramp. */
+  async firstSentAtFrom(fromEmail: string): Promise<Date | null> {
+    const c = await getCollections();
+    const m = await c.messages
+      .find({ status: "sent", fromEmail })
+      .sort({ sentAt: 1 })
+      .limit(1)
+      .next();
+    return m?.sentAt ?? null;
+  },
+
   async listForLead(leadId: string): Promise<Message[]> {
     const c = await getCollections();
     return c.messages.find({ leadId }).sort({ scheduledAt: 1 }).toArray();
@@ -313,6 +371,23 @@ export const MessagesRepo = {
       { $set: { status: "canceled", updatedAt: now() } },
     );
     return res.modifiedCount;
+  },
+};
+
+// ── Mailbox IMAP cursors ─────────────────────────────────────────────────────
+export const MailboxStateRepo = {
+  async get(email: string): Promise<MailboxState | null> {
+    const c = await getCollections();
+    return c.mailboxStates.findOne({ _id: email.toLowerCase() });
+  },
+
+  async set(email: string, lastUid: number, uidValidity: number): Promise<void> {
+    const c = await getCollections();
+    await c.mailboxStates.updateOne(
+      { _id: email.toLowerCase() },
+      { $set: { lastUid, uidValidity, updatedAt: now() } },
+      { upsert: true },
+    );
   },
 };
 
@@ -417,6 +492,12 @@ export const VariantsRepo = {
     return c.variants.find({ campaignId }).sort({ step: 1 }).toArray();
   },
 
+  /** All variants spawned by a hypothesis — used to measure its outcome. */
+  async listForHypothesis(hypothesisId: string): Promise<Variant[]> {
+    const c = await getCollections();
+    return c.variants.find({ hypothesisId }).toArray();
+  },
+
   async setActive(id: string, active: boolean): Promise<void> {
     const c = await getCollections();
     await c.variants.updateOne({ _id: id }, { $set: { active, updatedAt: now() } });
@@ -447,17 +528,53 @@ export const HypothesesRepo = {
     return doc;
   },
 
-  async setStatus(id: string, status: HypothesisStatus, result?: string): Promise<void> {
+  async getById(id: string): Promise<Hypothesis | null> {
     const c = await getCollections();
-    await c.hypotheses.updateOne(
-      { _id: id },
-      { $set: { status, result, updatedAt: now() } },
-    );
+    return c.hypotheses.findOne({ _id: id });
+  },
+
+  async setStatus(
+    id: string,
+    status: HypothesisStatus,
+    result?: string,
+    metric?: string,
+  ): Promise<void> {
+    const c = await getCollections();
+    const set: Partial<Hypothesis> = { status, updatedAt: now() };
+    if (result !== undefined) set.result = result;
+    if (metric !== undefined) set.metric = metric;
+    await c.hypotheses.updateOne({ _id: id }, { $set: set });
   },
 
   async list(): Promise<Hypothesis[]> {
     const c = await getCollections();
     return c.hypotheses.find({}).sort({ createdAt: -1 }).toArray();
+  },
+
+  async listByStatus(status: HypothesisStatus): Promise<Hypothesis[]> {
+    const c = await getCollections();
+    return c.hypotheses.find({ status }).sort({ updatedAt: -1 }).toArray();
+  },
+
+  /** Most recently decided experiments (kept/rejected) — fed back to the strategist. */
+  async recentDecided(limit = 8): Promise<Hypothesis[]> {
+    const c = await getCollections();
+    return c.hypotheses
+      .find({ status: { $in: ["keep", "reject"] } })
+      .sort({ updatedAt: -1 })
+      .limit(limit)
+      .toArray();
+  },
+
+  /** Counts by status for dashboards/digests. */
+  async countsByStatus(): Promise<Record<HypothesisStatus, number>> {
+    const c = await getCollections();
+    const rows = await c.hypotheses
+      .aggregate<{ _id: HypothesisStatus; n: number }>([{ $group: { _id: "$status", n: { $sum: 1 } } }])
+      .toArray();
+    const out: Record<HypothesisStatus, number> = { proposed: 0, testing: 0, keep: 0, reject: 0 };
+    for (const r of rows) out[r._id] = r.n;
+    return out;
   },
 };
 

@@ -18,6 +18,7 @@ import { runDailyCycle } from "../workers/daily-cycle.js";
 import { runWeeklyReview } from "../workers/weekly-review.js";
 import { runMonthlyReview } from "../workers/monthly-review.js";
 import { handleInboundReply } from "../services/replies.service.js";
+import { imapEnabled, pollReplies } from "../services/imap-poller.service.js";
 import { createGmailPixel } from "../services/compose.service.js";
 import { generateVariants, variantLeaderboard, pruneVariants, ensureCampaign } from "../services/variants.service.js";
 import { createVideoForLead, produceVideo } from "../services/video.service.js";
@@ -31,7 +32,8 @@ import { emailCandidates, verifyBestEmail } from "../lib/email-verify.js";
 import { handleChat } from "../agent/agent.js";
 import { runAutonomousCycle } from "../workers/autonomous-cycle.js";
 import { executeApproval, denyApproval } from "../agent/approvals.js";
-import { ApprovalsRepo } from "../repositories/index.js";
+import { ApprovalsRepo, HypothesesRepo } from "../repositories/index.js";
+import { evaluateHypotheses } from "../services/experiments.service.js";
 import type { EventType, LeadStatus } from "../models/types.js";
 
 const csv = (v: string | boolean | undefined) =>
@@ -123,19 +125,31 @@ async function cmdCreateCampaign(p: Parsed) {
   const offer = str(p.flags.offer);
   const persona = str(p.flags.persona);
   if (!name || !offer || !persona) {
-    throw new Error('usage: cli create-campaign --name "X" --offer "..." --persona "..." [--from email] [--active]');
+    throw new Error('usage: cli create-campaign --name "X" --offer "..." --persona "..." [--from email] [--sequence-file seq.json] [--active]');
   }
   const existing = await CampaignsRepo.getByName(name);
   if (existing) {
     log.warn(`campaign "${name}" already exists (${existing._id})`);
     return;
   }
+
+  // Optional custom sequence (e.g. with bodyTemplate/subjectTemplate slots).
+  let sequence = DEFAULT_SEQUENCE;
+  const seqFile = str(p.flags["sequence-file"]);
+  if (seqFile) {
+    const raw = readFileSync(seqFile, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.length) throw new Error("sequence file must be a non-empty JSON array of steps");
+    sequence = parsed as typeof DEFAULT_SEQUENCE;
+    log.info(`loaded ${sequence.length}-step sequence from ${seqFile}`);
+  }
+
   const c = await CampaignsRepo.create({
     name,
     offer,
     targetPersona: persona,
     fromEmail: str(p.flags.from) || undefined,
-    sequence: DEFAULT_SEQUENCE,
+    sequence,
     status: p.flags.active ? "active" : "draft",
   });
   log.info(`created campaign "${c.name}" (${c._id}) status=${c.status}, ${c.sequence.length} steps`);
@@ -205,6 +219,44 @@ async function cmdIngestReply(p: Parsed) {
   if (!email || !text) throw new Error('usage: cli ingest-reply --email <e> --text "reply text" [--message <id>]');
   const r = await handleInboundReply({ fromEmail: email, text, messageId: str(p.flags.message) || undefined });
   log.info(`classified: ${r.classification}`);
+}
+
+async function cmdPollReplies() {
+  if (!imapEnabled()) {
+    log.warn("IMAP polling is disabled — set IMAP_ENABLED=true and configure mailbox credentials");
+    return;
+  }
+  const r = await pollReplies();
+  log.info(`polled ${r.mailboxes} mailbox(es), ingested ${r.replies} reply(ies)`);
+}
+
+async function cmdHypotheses(p: Parsed) {
+  const status = str(p.flags.status);
+  const rows = status
+    ? await HypothesesRepo.listByStatus(status as never)
+    : await HypothesesRepo.list();
+  if (!rows.length) {
+    log.info("no hypotheses yet (run daily-cycle with the strategist configured)");
+    return;
+  }
+  const icon: Record<string, string> = { proposed: "•", testing: "🧪", keep: "✅", reject: "❌" };
+  for (const h of rows.slice(0, 50)) {
+    // eslint-disable-next-line no-console
+    console.log(`${icon[h.status] ?? "•"} [${h.status}] ${h.idea}${h.result ? `\n     → ${h.result}` : ""}`);
+  }
+  // eslint-disable-next-line no-console
+  console.log(`\n${rows.length} hypotheses`);
+}
+
+async function cmdEvalHypotheses() {
+  const verdicts = await evaluateHypotheses();
+  if (!verdicts.length) {
+    log.info("no hypotheses had enough data to decide yet");
+    return;
+  }
+  for (const v of verdicts) {
+    log.info(`${v.decision.toUpperCase()}: ${v.idea} — ${v.result}`);
+  }
 }
 
 async function cmdEvent(p: Parsed) {
@@ -452,7 +504,7 @@ const HELP = `AI SDR CLI
   init                          create indexes
   import-leads <csv>            import leads from CSV (header row required, must include 'email')
   add-lead --email ...          add/update one lead
-  create-campaign --name --offer --persona [--from] [--active]
+  create-campaign --name --offer --persona [--from] [--sequence-file seq.json] [--active]
   list-campaigns
   activate-campaign <name|id>
   enroll --campaign <name|id> [--status new] [--limit 50] [--lead <email>]
@@ -481,6 +533,9 @@ const HELP = `AI SDR CLI
   approvals                     list pending approvals
   approve <id> | deny <id>      decide a pending approval
   ingest-reply --email --text [--message]   simulate an inbound reply
+  poll-replies                  fetch + ingest replies over IMAP now
+  hypotheses [--status testing|keep|reject]   list experiments + their results
+  eval-hypotheses               score testing experiments → keep/reject now
   event --email --type <booked|showed|closed_won|...>   manually log an event
   status                        pipeline overview
   lead <email>                  inspect one lead`;
@@ -523,6 +578,9 @@ async function run() {
     case "approve": await cmdApprove(p); break;
     case "deny": await cmdDeny(p); break;
     case "ingest-reply": await cmdIngestReply(p); break;
+    case "poll-replies": await cmdPollReplies(); break;
+    case "hypotheses": await cmdHypotheses(p); break;
+    case "eval-hypotheses": await cmdEvalHypotheses(); break;
     case "event": await cmdEvent(p); break;
     case "status": await cmdStatus(); break;
     case "lead": await cmdLead(p); break;

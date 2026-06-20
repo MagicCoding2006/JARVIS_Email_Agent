@@ -1,14 +1,19 @@
 import { worker } from "../llm/roles.js";
 import { buildPersonalizationPrompt, type DraftedEmail, type VariantHint } from "../llm/prompts.js";
 import { createLogger } from "../lib/logger.js";
+import { renderTemplate } from "./templating.service.js";
 import type { Campaign, Lead, SequenceStep } from "../models/types.js";
 
 const log = createLogger("personalization");
 
 /**
- * Draft a single email for a lead/step using the worker model.
- * Falls back to a simple template if the model is unconfigured or errors,
- * so the pipeline keeps running in dev/dry-run.
+ * Draft a single email for a lead/step.
+ *  - If the step has a `bodyTemplate`, render the hybrid template (fixed copy +
+ *    AI/research/merge slots) — you keep structural control, AI fills only the
+ *    portions you marked.
+ *  - Otherwise the worker model writes the whole email from the step's angle.
+ * Falls back to a simple template if the model is unconfigured or errors, so the
+ * pipeline keeps running in dev/dry-run.
  */
 export async function draftEmail(args: {
   lead: Lead;
@@ -18,7 +23,19 @@ export async function draftEmail(args: {
   priorBody?: string;
   variant?: VariantHint;
 }): Promise<DraftedEmail> {
-  const { lead, campaign, step } = args;
+  const { lead, campaign, step, priorSubject } = args;
+
+  // Hybrid-template path: structured email with AI/research/merge slots.
+  if (step.bodyTemplate) {
+    const ctx = { lead, campaign, step, priorSubject, priorBody: args.priorBody };
+    const body = await renderTemplate(step.bodyTemplate, ctx);
+    let subject = step.subjectTemplate ? await renderTemplate(step.subjectTemplate, ctx) : "";
+    if (!subject.trim()) {
+      // No subject template: reuse the thread subject on follow-ups, else a default.
+      subject = step.followUp && priorSubject ? priorSubject : defaultSubject(lead);
+    }
+    return { subject: subject.trim() || defaultSubject(lead), body: body.trim() };
+  }
 
   if (!worker.configured) {
     log.warn("worker LLM not configured — using fallback template");
@@ -34,6 +51,10 @@ export async function draftEmail(args: {
     log.error("draft failed, using fallback", err);
     return fallbackTemplate(args);
   }
+}
+
+function defaultSubject(lead: Lead): string {
+  return `quick idea for ${lead.company || "your team"}`;
 }
 
 function fallbackTemplate(args: {

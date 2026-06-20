@@ -7,6 +7,7 @@ import {
   renderBreakdown,
 } from "../services/analytics.service.js";
 import { pruneVariants, variantLeaderboard } from "../services/variants.service.js";
+import { evaluateHypotheses, summarizePriorExperiments } from "../services/experiments.service.js";
 import { notify } from "../services/notifications.service.js";
 
 const log = createLogger("weekly-review");
@@ -42,13 +43,21 @@ export async function runWeeklyReview(): Promise<void> {
     totalPruned += pruned;
   }
 
-  const data = { industry, campaigns, variantLeaderboards: leaderboards };
+  // Close the learning loop: judge this cycle's experiments (keep/reject).
+  const verdicts = await evaluateHypotheses();
+  const kept = verdicts.filter((v) => v.decision === "keep");
+  const rejected = verdicts.filter((v) => v.decision === "reject");
+
+  const data = { industry, campaigns, variantLeaderboards: leaderboards, experimentResults: verdicts };
 
   let out: WeeklyOutput | undefined;
   if (strategist.configured) {
     try {
+      const priorResults = await summarizePriorExperiments();
       out = await strategist.completeJSON<WeeklyOutput>(
-        `Weekly performance data:\n${JSON.stringify(data, null, 2)}\n\nAnalyze and respond in the required JSON shape.`,
+        `Weekly performance data:\n${JSON.stringify(data, null, 2)}\n\n` +
+          (priorResults ? `${priorResults}\n\n` : "") +
+          `Analyze and respond in the required JSON shape.`,
         { system: SYSTEM, temperature: 0.5, maxTokens: 1800 },
       );
     } catch (err) {
@@ -56,11 +65,18 @@ export async function runWeeklyReview(): Promise<void> {
     }
   }
 
+  const experimentLines = [
+    ...kept.map((v) => `  ✅ KEEP: ${v.idea} (${v.result})`),
+    ...rejected.map((v) => `  ❌ REJECT: ${v.idea} (${v.result})`),
+  ];
+
   const digest = [
     "📈 Weekly strategic review",
     renderBreakdown("By industry (7d):", industry),
     renderBreakdown("By campaign (7d):", campaigns),
     `Variants pruned this week: ${totalPruned}`,
+    `Experiments decided: ${kept.length} kept, ${rejected.length} rejected`,
+    experimentLines.length ? experimentLines.join("\n") : "",
     out ? `\nBest industries: ${out.bestIndustries?.join(", ")}` : "",
     out ? `Worst industries: ${out.worstIndustries?.join(", ")}` : "",
     out ? `Best offer: ${out.bestOffer}  |  Worst: ${out.worstOffer}` : "",

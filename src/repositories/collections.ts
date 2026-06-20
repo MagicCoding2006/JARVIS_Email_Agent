@@ -12,6 +12,7 @@ import type {
   NotificationLog,
   VideoAsset,
   Approval,
+  MailboxState,
 } from "../models/types.js";
 
 const log = createLogger("db");
@@ -27,6 +28,7 @@ export const COLLECTIONS = {
   notifications: "notifications",
   videos: "videos",
   approvals: "approvals",
+  mailboxStates: "mailbox_states",
 } as const;
 
 export interface Collections {
@@ -40,6 +42,7 @@ export interface Collections {
   notifications: Collection<NotificationLog>;
   videos: Collection<VideoAsset>;
   approvals: Collection<Approval>;
+  mailboxStates: Collection<MailboxState>;
 }
 
 export async function getCollections(): Promise<Collections> {
@@ -55,6 +58,7 @@ export async function getCollections(): Promise<Collections> {
     notifications: db.collection<NotificationLog>(COLLECTIONS.notifications),
     videos: db.collection<VideoAsset>(COLLECTIONS.videos),
     approvals: db.collection<Approval>(COLLECTIONS.approvals),
+    mailboxStates: db.collection<MailboxState>(COLLECTIONS.mailboxStates),
   };
 }
 
@@ -76,6 +80,8 @@ export async function ensureIndexes(): Promise<void> {
     c.messages.createIndex({ leadId: 1 }),
     c.messages.createIndex({ enrollmentId: 1, step: 1 }),
     c.messages.createIndex({ "links.linkId": 1 }),
+    c.messages.createIndex({ fromEmail: 1, status: 1, sentAt: 1 }),
+    c.messages.createIndex({ messageIdHeader: 1 }, { sparse: true }),
 
     c.events.createIndex({ leadId: 1, timestamp: -1 }),
     c.events.createIndex({ type: 1, timestamp: -1 }),
@@ -83,6 +89,7 @@ export async function ensureIndexes(): Promise<void> {
     c.events.createIndex({ messageId: 1 }),
 
     c.variants.createIndex({ campaignId: 1, step: 1 }),
+    c.variants.createIndex({ hypothesisId: 1 }, { sparse: true }),
     c.notifications.createIndex({ createdAt: -1 }),
     c.videos.createIndex({ leadId: 1 }),
     c.approvals.createIndex({ status: 1, createdAt: -1 }),

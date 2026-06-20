@@ -76,6 +76,98 @@ Return ONLY the JSON object.`;
   return { system: WRITER_SYSTEM, user };
 }
 
+/**
+ * Fill all AI slots in a templated email in ONE call (cost control). Each slot
+ * is a short, specific fragment dropped into fixed surrounding copy.
+ */
+export function buildSlotFillPrompt(args: {
+  lead: Lead;
+  campaign: Campaign;
+  step: SequenceStep;
+  priorBody?: string;
+  slots: string[];
+}): { system: string; user: string } {
+  const system = `You write tiny, specific personalization fragments to slot INTO a cold email between fixed copy.
+Rules: plain text only (no quotes, markdown, or emojis); make each fragment fit naturally where it's inserted; keep it as short as the instruction implies; sound like a human; and NEVER invent facts about the prospect — if you can't support a claim, write a safe generic phrasing or an empty string.
+Return ONLY JSON: {"slots": {"1": "...", "2": "..."}} with exactly one entry per slot, keyed by its number.`;
+
+  const thread = args.priorBody
+    ? `\nThis email is a follow-up to:\n"""\n${args.priorBody}\n"""\n`
+    : "";
+  const slotList = args.slots.map((s, i) => `${i + 1}) ${s}`).join("\n");
+
+  const user = `CONTEXT
+Offer: ${args.campaign.offer}
+Persona: ${args.campaign.targetPersona}
+Step angle: ${args.step.angle}
+${thread}
+PROSPECT
+${leadBlock(args.lead)}
+
+Fill each slot below with a fragment that fits the offer + prospect. Return ONLY the JSON object.
+SLOTS:
+${slotList}`;
+
+  return { system, user };
+}
+
+/**
+ * Have the WRITER model (GPT) author a reusable hybrid template for a step —
+ * fixed copy plus slots that get filled per-prospect at send time. GPT writes
+ * the actual prose; the strategist only supplies guidance.
+ */
+export function buildTemplateAuthorPrompt(args: {
+  campaign: Campaign;
+  step: SequenceStep;
+  guidance?: string;
+}): { system: string; user: string } {
+  const system = `You are an elite B2B SDR who designs reusable cold-email TEMPLATES.
+A template is fixed copy you write yourself, plus placeholder SLOTS that get filled per-prospect at send time:
+- {{firstName|there}}      → a lead field (firstName,lastName,name,title,company,industry,website,email, or a custom field) with an optional |default
+- {{ai: short instruction}} → the writer model fills this tailored fragment per prospect
+- {{research: task}}        → web research fills this factual fragment per prospect
+Rules:
+- Write the fixed copy in a human, concise voice (40-90 words first touch, 20-50 for follow-ups). Plain text only, no markdown/emojis.
+- Put a slot ONLY where per-prospect personalization actually helps. Use {{research:}} for facts about the prospect, {{ai:}} for tailored phrasing, merge fields for known data.
+- Do NOT fill the slots yourself. Do NOT nest slots. One clear CTA.
+Return ONLY JSON: {"subjectTemplate":"...","bodyTemplate":"..."}.`;
+
+  const thread = args.step.followUp
+    ? "This is a FOLLOW-UP that threads as a reply — keep it short and reference the prior outreach lightly."
+    : "This is a first-touch (or fresh-angle) email.";
+
+  const user = `Design a template for step ${args.step.step} (${args.step.purpose}).
+Offer: ${args.campaign.offer}
+Persona: ${args.campaign.targetPersona}
+Step angle: ${args.step.angle}
+Guidance: ${args.guidance || "(use your best judgment)"}
+${thread}
+Return ONLY the JSON object.`;
+
+  return { system, user };
+}
+
+/** Turn web-research context into ONE factual fragment for a single research slot. */
+export function buildResearchSlotPrompt(args: {
+  lead: Lead;
+  task: string;
+  context: string;
+  cached?: string;
+}): { system: string; user: string } {
+  const system = `You turn web research into ONE short, factual personalization fragment for a cold email.
+Plain text only, no quotes/markdown. NEVER invent — if the research doesn't clearly support the task, return an empty string.
+Return ONLY JSON: {"text": "..."}.`;
+
+  const user = `Prospect: ${args.lead.name ?? args.lead.email}, ${args.lead.title ?? ""} at ${args.lead.company ?? ""}.
+${args.cached ? `Known context: ${args.cached}\n` : ""}Search results:
+${args.context || "(none)"}
+
+Task: ${args.task}
+Write the fragment, or "" if the research doesn't support it. Return ONLY the JSON object.`;
+
+  return { system, user };
+}
+
 export function buildSubjectLinesPrompt(args: {
   campaign: Campaign;
   count: number;

@@ -42,6 +42,7 @@
   </div>
   <div class="flex-1"></div>
   <div id="badge-dryrun" class="hidden pill bg-amber-900 text-amber-300">DRY RUN</div>
+  <div id="badge-paused" class="hidden pill bg-red-900 text-red-300" title="Bounce rate too high — sending auto-paused">⛔ SENDING PAUSED</div>
   <div id="badge-conn" class="pill bg-gray-800 text-gray-400">⬤ connecting…</div>
   <div id="badge-total" class="pill bg-blue-900 text-blue-300">— leads</div>
 </header>
@@ -144,6 +145,12 @@
       </a>
     </div>
 
+    <!-- Mailboxes (warmup + rotation) -->
+    <div class="p-4 border-t border-gray-800">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Mailboxes</h2>
+      <div id="mailbox-list" class="flex flex-col gap-2 text-xs text-gray-500">loading…</div>
+    </div>
+
     <!-- Status -->
     <div class="p-4 mt-auto border-t border-gray-800">
       <div id="system-status" class="text-xs text-gray-600 mono">loading…</div>
@@ -222,6 +229,15 @@
           <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Performance by Campaign</h3>
           <table class="w-full text-xs"><thead id="campaign-head"></thead><tbody id="campaign-body"></tbody></table>
         </div>
+      </div>
+
+      <!-- Experiments / learning loop -->
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+        <div class="flex items-center gap-3 mb-3">
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest">Experiments (Learning Loop)</h3>
+          <div id="exp-counts" class="flex gap-2 text-[11px]"></div>
+        </div>
+        <div id="exp-list" class="flex flex-col gap-1.5 text-xs text-gray-500">loading…</div>
       </div>
 
       <div id="ana-updated" class="text-xs text-gray-600 mono text-right">—</div>
@@ -331,8 +347,12 @@ async function loadStats() {
     document.getElementById('badge-conn').textContent  = '⬤ connected';
     document.getElementById('badge-conn').className    = 'pill bg-emerald-900 text-emerald-400';
     if (d.dryRun) document.getElementById('badge-dryrun').classList.remove('hidden');
+    document.getElementById('badge-paused').classList.toggle('hidden', !d.sendingPaused);
+    const bounceLine = d.bounceRatePct != null
+      ? `<br>Bounce: ${d.bounceRatePct}%${d.sendingPaused ? ' ⛔ PAUSED' : ''}`
+      : '';
     document.getElementById('system-status').innerHTML =
-      `Limit: ${d.dailyLimit}/day<br>Mode: ${d.dryRun ? '🔶 DRY RUN (no real sends)' : '🟢 LIVE'}`;
+      `Limit: ${d.dailyLimit}/day<br>Mode: ${d.dryRun ? '🔶 DRY RUN (no real sends)' : '🟢 LIVE'}${bounceLine}`;
   } catch (e) {
     document.getElementById('badge-conn').textContent = '⬤ error';
     document.getElementById('badge-conn').className = 'pill bg-red-900 text-red-400';
@@ -431,6 +451,34 @@ async function loadCrm(highlightNew = false) {
     indicator.textContent = '✓ ' + new Date().toLocaleTimeString();
   } catch {
     indicator.textContent = '✗ error';
+  }
+}
+
+// ── Mailboxes (warmup + rotation) ────────────────────────────────────────────
+async function loadMailboxes() {
+  try {
+    const r = await fetch('./api/mailboxes');
+    if (!r.ok) throw new Error(r.status);
+    const boxes = await r.json();
+    const el = document.getElementById('mailbox-list');
+    if (!boxes.length) { el.textContent = 'none configured'; return; }
+    el.innerHTML = boxes.map(b => {
+      const pct = b.cap > 0 ? Math.min(100, Math.round((b.sentToday / b.cap) * 100)) : 0;
+      const full = b.remaining <= 0;
+      const warm = b.warmup ? `warmup d${b.warmupDay}` : 'full speed';
+      return `<div>
+        <div class="flex justify-between items-baseline gap-2">
+          <span class="text-gray-300 mono truncate" title="${b.email}">${b.email}</span>
+          <span class="${full ? 'text-orange-400' : 'text-gray-500'} mono whitespace-nowrap">${b.sentToday}/${b.cap}</span>
+        </div>
+        <div class="h-1 bg-gray-800 rounded mt-1 overflow-hidden">
+          <div class="h-full ${full ? 'bg-orange-500' : 'bg-blue-500'}" style="width:${pct}%"></div>
+        </div>
+        <div class="text-[10px] text-gray-600 mt-0.5">${warm} · ${b.remaining} left today</div>
+      </div>`;
+    }).join('');
+  } catch {
+    document.getElementById('mailbox-list').textContent = '✗ error';
   }
 }
 
@@ -710,6 +758,39 @@ async function loadAnalytics() {
   } finally {
     analyticsLoading = false;
   }
+  loadHypotheses();
+}
+
+// ── Experiments (hypothesis learning loop) ───────────────────────────────────
+const EXP_STYLE = {
+  proposed: { dot: '•',  cls: 'bg-gray-800 text-gray-400' },
+  testing:  { dot: '🧪', cls: 'bg-blue-900 text-blue-300' },
+  keep:     { dot: '✅', cls: 'bg-emerald-900 text-emerald-300' },
+  reject:   { dot: '❌', cls: 'bg-red-900 text-red-300' },
+};
+async function loadHypotheses() {
+  try {
+    const r = await fetch('./api/hypotheses');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const c = d.counts || {};
+    document.getElementById('exp-counts').innerHTML = ['proposed','testing','keep','reject']
+      .map(s => `<span class="pill ${EXP_STYLE[s].cls}">${EXP_STYLE[s].dot} ${c[s] || 0} ${s}</span>`).join('');
+    const list = document.getElementById('exp-list');
+    if (!d.recent.length) { list.textContent = 'No experiments yet — the strategist proposes these on the daily cycle.'; return; }
+    list.innerHTML = d.recent.map(h => {
+      const st = EXP_STYLE[h.status] || EXP_STYLE.proposed;
+      return `<div class="flex items-start gap-2 border-b border-gray-800/50 pb-1.5">
+        <span class="pill ${st.cls} whitespace-nowrap">${st.dot} ${h.status}</span>
+        <div class="flex-1">
+          <div class="text-gray-300">${h.idea}</div>
+          ${h.result ? `<div class="text-[11px] text-gray-500 mono">${h.result}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch {
+    document.getElementById('exp-list').textContent = '✗ error';
+  }
 }
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
@@ -717,10 +798,12 @@ loadStats();
 loadCrm();
 loadCampaigns();
 loadAnalytics();
+loadMailboxes();
 setInterval(loadStats, 8000);
 setInterval(() => { if (currentView === 'crm') loadCrm(true); }, 4000);
 setInterval(loadCampaigns, 30000);
 setInterval(() => { if (currentView === 'overview') loadAnalytics(); }, 30000);
+setInterval(loadMailboxes, 15000);
 </script>
 </body>
 </html>

@@ -52,6 +52,17 @@ export interface SequenceStep {
   instructions: string;
   /** If true this is a short follow-up that replies into the same thread. */
   followUp: boolean;
+  /**
+   * Optional hybrid template for the BODY. When set, the email is rendered from
+   * this template instead of fully AI-written, mixing fixed copy with slots:
+   *   {{firstName}} / {{company|your team}}  → merge fields (with optional default)
+   *   {{ai: one line on their recent launch}} → AI fills just this fragment
+   *   {{research: their latest funding round}} → web-research fills this fragment
+   * Gives you fixed structure + AI/research personalization only where you want it.
+   */
+  bodyTemplate?: string;
+  /** Optional template for the SUBJECT (same slot syntax as bodyTemplate). */
+  subjectTemplate?: string;
 }
 
 export type CampaignStatus = "draft" | "active" | "paused" | "archived";
@@ -86,9 +97,23 @@ export interface Enrollment {
   /** Highest step number already scheduled/sent (0 = none yet). */
   currentStep: number;
   enrolledAt: Date;
+  /** Sticky sending mailbox for this prospect — every touch sends from it so the
+   *  thread stays consistent. Assigned when the first step is scheduled. */
+  assignedMailbox?: string;
   lastSentAt?: Date;
   stopReason?: string;
   createdAt: Date;
+  updatedAt: Date;
+}
+
+/** IMAP poll cursor per mailbox so we only ingest new replies (not the whole inbox). */
+export interface MailboxState {
+  /** Mailbox email address. */
+  _id: string;
+  /** Highest INBOX UID already processed. */
+  lastUid: number;
+  /** IMAP UIDVALIDITY when lastUid was recorded (reset to 0 if it changes). */
+  uidValidity: number;
   updatedAt: Date;
 }
 

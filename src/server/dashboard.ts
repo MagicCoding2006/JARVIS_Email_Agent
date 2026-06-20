@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { buildCrmSnapshot, buildCrmPage, toCsv } from "../services/crm.service.js";
 import { buildDashboardAnalytics } from "../services/analytics.service.js";
-import { LeadsRepo, CampaignsRepo } from "../repositories/index.js";
+import { allCapacities, getMailboxes } from "../services/sender/mailbox.js";
+import { checkSendingHealth } from "../services/sending-health.service.js";
+import { LeadsRepo, CampaignsRepo, HypothesesRepo } from "../repositories/index.js";
 import { enrollLead } from "../services/sequencer.service.js";
 import { dispatchDue } from "../workers/dispatcher.js";
 import { config } from "../config/index.js";
@@ -32,7 +34,7 @@ export function createDashboardRouter(): Router {
   // ── Pipeline stats ──────────────────────────────────────────────────────────
   router.get("/api/stats", async (_req: Request, res: Response) => {
     try {
-      const [total, newLeads, active, replied, meetings, won, hot] = await Promise.all([
+      const [total, newLeads, active, replied, meetings, won, hot, health] = await Promise.all([
         LeadsRepo.count(),
         LeadsRepo.count({ status: "new" }),
         LeadsRepo.count({ status: "active" }),
@@ -40,11 +42,14 @@ export function createDashboardRouter(): Router {
         LeadsRepo.count({ status: "meeting" }),
         LeadsRepo.count({ status: "won" }),
         LeadsRepo.count({ score: { $gte: 70 } } as Record<string, unknown>),
+        checkSendingHealth(),
       ]);
       res.json({
         total, newLeads, active, replied, meetings, won, hot,
         dryRun: config.sending.dryRun,
         dailyLimit: config.sending.dailyLimit,
+        bounceRatePct: health.bounceRatePct,
+        sendingPaused: !health.healthy && !config.sending.dryRun,
       });
     } catch (err) {
       res.status(500).json({ error: String(err) });
@@ -61,6 +66,48 @@ export function createDashboardRouter(): Router {
         search: typeof req.query.search === "string" ? req.query.search : undefined,
       });
       res.json(page);
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // ── Mailbox pool: warmup + rotation status ──────────────────────────────────
+  router.get("/api/mailboxes", async (_req: Request, res: Response) => {
+    try {
+      const caps = await allCapacities();
+      const rows = getMailboxes().map((mb) => {
+        const c = caps.get(mb.email);
+        return {
+          email: mb.email,
+          warmup: mb.warmup,
+          warmupDay: c?.warmupDay ?? 0,
+          cap: c?.cap ?? mb.dailyCap,
+          sentToday: c?.sentToday ?? 0,
+          remaining: c?.remaining ?? 0,
+        };
+      });
+      res.json(rows);
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // ── Hypotheses / experiments (the learning loop) ────────────────────────────
+  router.get("/api/hypotheses", async (_req: Request, res: Response) => {
+    try {
+      const [counts, recent] = await Promise.all([
+        HypothesesRepo.countsByStatus(),
+        HypothesesRepo.list(),
+      ]);
+      res.json({
+        counts,
+        recent: recent.slice(0, 30).map((h) => ({
+          idea: h.idea,
+          status: h.status,
+          result: h.result ?? "",
+          updatedAt: h.updatedAt,
+        })),
+      });
     } catch (err) {
       res.status(500).json({ error: String(err) });
     }

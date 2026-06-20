@@ -1,0 +1,21 @@
+[
+  {
+    "step": 1,
+    "purpose": "intro",
+    "businessDayOffset": 0,
+    "angle": "Open with a specific, researched observation, then the core problem the offer solves.",
+    "instructions": "Earn the reply by being relevant, not salesy.",
+    "followUp": false,
+    "subjectTemplate": "{{ai: a 4-6 word lowercase curiosity subject line tied to their company}}",
+    "bodyTemplate": "Hi {{firstName|there}},\n\n{{research: one specific recent thing about their company (launch, hire, funding, press) to open with}}\n\nMost {{title|owners}} at companies like {{company|yours}} we talk to are dealing with {{ai: one sharp pain point this offer solves, phrased as their problem}}. We help with exactly that.\n\nWorth a quick 15-min look next week?\n\nAlex"
+  },
+  {
+    "step": 2,
+    "purpose": "bump",
+    "businessDayOffset": 3,
+    "angle": "Short friendly nudge that adds one new sentence of value.",
+    "instructions": "2-3 sentences max, threads as a reply.",
+    "followUp": true,
+    "bodyTemplate": "Hi {{firstName|there}},\n\nQuick nudge on this — {{ai: one new, specific value sentence not used in the first email}}\n\nOpen to a chat?\n\nAlex"
+  }
+]

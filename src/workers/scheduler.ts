@@ -8,6 +8,7 @@ import { runDailyCycle } from "./daily-cycle.js";
 import { runAutonomousCycle } from "./autonomous-cycle.js";
 import { runWeeklyReview } from "./weekly-review.js";
 import { runMonthlyReview } from "./monthly-review.js";
+import { imapEnabled, pollReplies } from "../services/imap-poller.service.js";
 
 const log = createLogger("scheduler");
 
@@ -28,6 +29,16 @@ export function startScheduler(): cron.ScheduledTask[] {
       processEvents().catch((err) => log.error("event job failed", err));
     }),
   );
+
+  // Poll mailboxes for replies over IMAP (every minute) when enabled. The
+  // poller guards against overlapping runs and no-ops without credentials.
+  if (imapEnabled()) {
+    tasks.push(
+      cron.schedule("* * * * *", () => {
+        pollReplies().catch((err) => log.error("imap poll failed", err));
+      }),
+    );
+  }
 
   // Once-daily brain (cost-controlled). If the strategist (GLM) is configured we
   // run the agentic cycle where it reviews + acts via tools; otherwise we fall
@@ -53,6 +64,8 @@ export function startScheduler(): cron.ScheduledTask[] {
     }),
   );
 
-  log.info("scheduler started (dispatch /5m, events /10m, daily 08:30, weekly Mon 09:00, monthly 1st 09:30)");
+  log.info(
+    `scheduler started (dispatch /5m, events /10m${imapEnabled() ? ", imap /1m" : ""}, daily 08:30, weekly Mon 09:00, monthly 1st 09:30)`,
+  );
   return tasks;
 }

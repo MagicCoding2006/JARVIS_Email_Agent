@@ -66,10 +66,38 @@ export const config = {
     windowEndHour: num("SEND_WINDOW_END_HOUR", 17),
     sendOnWeekends: bool("SEND_ON_WEEKENDS", false),
   },
+  mailboxes: {
+    // Pool of sending mailboxes for rotation. JSON array (or a file path) of:
+    //   { "email","fromName"?,"replyTo"?,"host"?,"port"?,"secure"?,"user"?,"pass"?,"dailyCap"?,"warmup"? }
+    // Empty → a single mailbox synthesized from smtp/mail above (back-compatible).
+    roster: opt("MAILBOXES"),
+    rosterFile: opt("MAILBOXES_FILE"),
+    // Ceiling per mailbox once fully warmed (per-mailbox "dailyCap" overrides this).
+    defaultDailyCap: num("MAILBOX_DAILY_CAP", num("DAILY_SEND_LIMIT", 40)),
+    // Warmup ramp: start low and add `incrementPerDay` each day since a mailbox's
+    // first send, until it reaches the mailbox cap (never exceeding maxPerDay).
+    warmup: {
+      enabled: bool("WARMUP_ENABLED", true),
+      startPerDay: num("WARMUP_START_PER_DAY", 5),
+      incrementPerDay: num("WARMUP_INCREMENT_PER_DAY", 5),
+      maxPerDay: num("WARMUP_MAX_PER_DAY", 40),
+    },
+  },
   tracking: {
     baseURL: opt("TRACKING_BASE_URL", "http://localhost:8787").replace(/\/$/, ""),
     port: num("TRACKING_PORT", 8787),
     replyWebhookSecret: opt("REPLY_WEBHOOK_SECRET", "change-me"),
+  },
+  imap: {
+    // Poll sending mailboxes over IMAP to auto-capture replies (self-hosted SMTP).
+    // Off by default — only needed if you don't have a provider POSTing /webhook/reply.
+    enabled: bool("IMAP_ENABLED", false),
+    // Default IMAP host/port for every mailbox (per-mailbox "imapHost" overrides).
+    host: opt("IMAP_HOST", "imap.gmail.com"),
+    port: num("IMAP_PORT", 993),
+    secure: bool("IMAP_SECURE", true),
+    // On a mailbox's first poll, only ingest mail from the last N days.
+    lookbackDays: num("IMAP_LOOKBACK_DAYS", 14),
   },
   notify: {
     webhookURL: opt("NOTIFY_WEBHOOK_URL"),
@@ -79,6 +107,11 @@ export const config = {
     companyName: opt("COMPANY_NAME", "Your Company"),
     companyAddress: opt("COMPANY_ADDRESS", ""),
     unsubscribeFooter: bool("UNSUBSCRIBE_FOOTER", true),
+    // Reputation guard: pause ALL sending if the recent bounce rate (over
+    // bounceWindowHours, once ≥ minSample sends) reaches this percentage.
+    bouncePauseThresholdPct: num("BOUNCE_PAUSE_THRESHOLD_PCT", 8),
+    bouncePauseMinSample: num("BOUNCE_PAUSE_MIN_SAMPLE", 20),
+    bounceWindowHours: num("BOUNCE_WINDOW_HOURS", 24),
   },
   agent: {
     // "semi" = low-risk auto, high-risk needs approval; "propose" = approve all;

@@ -2,6 +2,8 @@ import type { Tool } from "./types.js";
 import { getMetrics, getPipelineStatus, getBreakdowns } from "./metrics.tools.js";
 import { listCampaigns, createCampaign, setCampaignStatus, changeOffer, enrollLeads } from "./campaign.tools.js";
 import { genVariants, listVariants, prune } from "./variant.tools.js";
+import { evaluateExperiments, listHypotheses } from "./experiment.tools.js";
+import { draftStepTemplate, setStepTemplate } from "./template.tools.js";
 import {
   getLead,
   listHotLeads,
@@ -21,6 +23,7 @@ const TOOLS: Tool[] = [
   getBreakdowns,
   listCampaigns,
   listVariants,
+  listHypotheses,
   getLead,
   listHotLeads,
   search,
@@ -28,11 +31,14 @@ const TOOLS: Tool[] = [
   // low-risk actions (auto under semi)
   genVariants,
   prune,
+  evaluateExperiments,
+  draftStepTemplate,
   research,
   // high-risk actions (need approval under semi)
   createCampaign,
   setCampaignStatus,
   changeOffer,
+  setStepTemplate,
   enrollLeads,
   discover,
   discoverBusinessContactLeads,

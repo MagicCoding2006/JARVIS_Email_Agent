@@ -5,21 +5,33 @@ import type { EmailSender, SendRequest, SendResult } from "./sender.interface.js
 
 const log = createLogger("sender:smtp");
 
+export interface SmtpTransportConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user?: string;
+  pass?: string;
+}
+
 /**
  * Generic SMTP sender (nodemailer). Works with Google Workspace, Zoho,
  * Mailgun/SES SMTP, etc. Swappable: add a GmailOAuthSender or
  * InstantlySender implementing EmailSender and wire it in ./index.ts.
+ *
+ * Pass a per-mailbox `SmtpTransportConfig` to bind one transport (and one set
+ * of credentials) per sending mailbox; defaults to the global `config.smtp`.
  */
 export class SmtpSender implements EmailSender {
-  readonly name = "smtp";
+  readonly name: string;
   private transporter: Transporter;
 
-  constructor() {
+  constructor(smtp: SmtpTransportConfig = config.smtp, label = "smtp") {
+    this.name = label;
     this.transporter = nodemailer.createTransport({
-      host: config.smtp.host,
-      port: config.smtp.port,
-      secure: config.smtp.secure,
-      auth: config.smtp.user ? { user: config.smtp.user, pass: config.smtp.pass } : undefined,
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      auth: smtp.user ? { user: smtp.user, pass: smtp.pass } : undefined,
       pool: true,
       maxConnections: 1,
       maxMessages: 50,

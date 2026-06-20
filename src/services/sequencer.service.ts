@@ -1,4 +1,3 @@
-import { config } from "../config/index.js";
 import { uuid } from "../lib/ids.js";
 import { scheduleFromAnchor } from "../lib/time.js";
 import { createLogger } from "../lib/logger.js";
@@ -11,9 +10,27 @@ import {
 import { draftEmail } from "./personalization.service.js";
 import { buildTrackedContent } from "./tracking.service.js";
 import { selectVariant } from "./variants.service.js";
-import type { Enrollment, Message } from "../models/types.js";
+import { assignMailbox, getMailboxByEmail } from "./sender/mailbox.js";
+import type { Campaign, Enrollment, Message } from "../models/types.js";
 
 const log = createLogger("sequencer");
+
+/**
+ * Resolve the from-address for this enrollment's touches. A campaign-pinned
+ * `fromEmail` wins (disables rotation); otherwise the enrollment keeps a sticky
+ * mailbox from the rotation pool so every touch in the thread sends from one
+ * address. Assigned lazily on the first step and persisted on the enrollment.
+ */
+async function resolveFromEmail(enrollment: Enrollment, campaign: Campaign): Promise<string> {
+  if (campaign.fromEmail) return campaign.fromEmail;
+  if (enrollment.assignedMailbox && getMailboxByEmail(enrollment.assignedMailbox)) {
+    return enrollment.assignedMailbox;
+  }
+  const mb = await assignMailbox();
+  await EnrollmentsRepo.setMailbox(enrollment._id, mb.email);
+  enrollment.assignedMailbox = mb.email;
+  return mb.email;
+}
 
 /**
  * Enroll a lead into a campaign and schedule the first touch.
@@ -89,6 +106,7 @@ export async function scheduleNextStep(enrollment: Enrollment): Promise<Message 
   const messageId = uuid();
   const { html, text, links } = buildTrackedContent({ messageId, body: draft.body, lead });
   const scheduledAt = scheduleFromAnchor(enrollment.enrolledAt, step.businessDayOffset);
+  const fromEmail = await resolveFromEmail(enrollment, campaign);
 
   const message = await MessagesRepo.create({
     _id: messageId,
@@ -101,7 +119,7 @@ export async function scheduleNextStep(enrollment: Enrollment): Promise<Message 
     body: draft.body,
     bodyHtml: html,
     bodyText: text,
-    fromEmail: campaign.fromEmail || config.mail.fromEmail,
+    fromEmail,
     toEmail: lead.email,
     status: "scheduled",
     scheduledAt,

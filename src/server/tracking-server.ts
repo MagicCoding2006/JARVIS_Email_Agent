@@ -82,15 +82,18 @@ export function createApp() {
   });
 
   // ── Unsubscribe ──────────────────────────────────────────────────────────────
+  const doUnsubscribe = async (tokenValue: string): Promise<void> => {
+    const lead = await LeadsRepo.findByUnsubscribeToken(tokenValue);
+    if (!lead) return;
+    await LeadsRepo.setUnsubscribed(lead._id);
+    await EnrollmentsRepo.stopAllForLead(lead._id, "stopped", "unsubscribed");
+    await EventsRepo.record({ leadId: lead._id, type: "unsubscribe", metadata: {} });
+    log.info(`unsubscribed ${lead.email}`);
+  };
+
   app.get("/u/:token", async (req: Request, res: Response) => {
     try {
-      const lead = await LeadsRepo.findByUnsubscribeToken(req.params.token);
-      if (lead) {
-        await LeadsRepo.setUnsubscribed(lead._id);
-        await EnrollmentsRepo.stopAllForLead(lead._id, "stopped", "unsubscribed");
-        await EventsRepo.record({ leadId: lead._id, type: "unsubscribe", metadata: {} });
-        log.info(`unsubscribed ${lead.email}`);
-      }
+      await doUnsubscribe(req.params.token);
     } catch (err) {
       log.error("unsubscribe error", err);
     }
@@ -100,6 +103,17 @@ export function createApp() {
         `<html><body style="font-family:sans-serif;text-align:center;padding:60px">` +
           `<h2>You've been unsubscribed</h2><p>You won't receive further emails from us.</p></body></html>`,
       );
+  });
+
+  // RFC 8058 one-click: mailbox providers POST here directly from the
+  // List-Unsubscribe-Post header (no human click). Must return 200 quickly.
+  app.post("/u/:token", async (req: Request, res: Response) => {
+    try {
+      await doUnsubscribe(req.params.token);
+    } catch (err) {
+      log.error("one-click unsubscribe error", err);
+    }
+    res.status(200).end();
   });
 
   // ── Video watch tracking + redirect ─────────────────────────────────────────
