@@ -124,6 +124,8 @@ export const config = {
   telegram: {
     botToken: opt("TELEGRAM_BOT_TOKEN"),
     chatId: opt("TELEGRAM_CHAT_ID"),
+    allowedUserIds: opt("TELEGRAM_ALLOWED_USER_IDS"),
+    allowedChatIds: opt("TELEGRAM_ALLOWED_CHAT_IDS"),
   },
   search: {
     // "duckduckgo" (free, no key, default) | "searxng" (self-hosted) |

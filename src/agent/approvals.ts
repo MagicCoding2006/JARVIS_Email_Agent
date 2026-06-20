@@ -11,9 +11,11 @@ export async function requestApproval(
   tool: string,
   args: Record<string, unknown>,
   summary: string,
+  chatId?: string,
 ): Promise<Approval> {
   const a = await ApprovalsRepo.create(tool, args, summary);
   await sendMessage(`🔐 Approval needed\n\n${summary}`, {
+    chatId,
     buttons: [[
       { text: "✅ Approve", data: `approve:${a._id}` },
       { text: "❌ Deny", data: `deny:${a._id}` },

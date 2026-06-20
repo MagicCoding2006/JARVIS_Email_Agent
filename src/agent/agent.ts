@@ -39,7 +39,7 @@ function safeParseArgs(s: string | undefined): Record<string, unknown> {
  * final text answer or hits the step cap. High-risk tool calls are intercepted
  * and queued for human approval instead of executing.
  */
-export async function runAgent(messages: Msg[], source: ToolContext["source"]): Promise<string> {
+export async function runAgent(messages: Msg[], source: ToolContext["source"], approvalChatId?: string): Promise<string> {
   if (!strategist.configured) {
     return "Strategist LLM not configured — set STRATEGIST_API_KEY (GLM) to enable the agent.";
   }
@@ -65,7 +65,7 @@ export async function runAgent(messages: Msg[], source: ToolContext["source"]): 
         const args = safeParseArgs(call.function.arguments);
         if (needsApproval(tool.risk)) {
           const summary = `${tool.name} ${call.function.arguments ?? "{}"}`;
-          const a = await requestApproval(tool.name, args, summary);
+          const a = await requestApproval(tool.name, args, summary, approvalChatId);
           result = {
             status: "pending_approval",
             approvalId: a._id,
@@ -91,17 +91,29 @@ export async function runAgent(messages: Msg[], source: ToolContext["source"]): 
   return "Reached the step limit. Some actions may be pending your approval.";
 }
 
-// ── Chat session (single-user, in-memory rolling history) ───────────────────
-let history: Msg[] = [{ role: "system", content: AGENT_SYSTEM }];
+// ── Chat sessions (in-memory rolling history, isolated by chat/session id) ───
+const histories = new Map<string, Msg[]>();
 
-export async function handleChat(text: string): Promise<string> {
+function getHistory(sessionId: string): Msg[] {
+  const existing = histories.get(sessionId);
+  if (existing) return existing;
+  const fresh: Msg[] = [{ role: "system", content: AGENT_SYSTEM }];
+  histories.set(sessionId, fresh);
+  return fresh;
+}
+
+export async function handleChat(text: string, sessionId = "default", approvalChatId?: string): Promise<string> {
+  let history = getHistory(sessionId);
   history.push({ role: "user", content: text });
-  const reply = await runAgent(history, "chat");
+  const reply = await runAgent(history, "chat", approvalChatId);
   // Trim to keep the system message + the last ~24 turns.
-  if (history.length > 26) history = [history[0], ...history.slice(-24)];
+  if (history.length > 26) {
+    history = [history[0], ...history.slice(-24)];
+    histories.set(sessionId, history);
+  }
   return reply;
 }
 
-export function resetChat(): void {
-  history = [{ role: "system", content: AGENT_SYSTEM }];
+export function resetChat(sessionId = "default"): void {
+  histories.set(sessionId, [{ role: "system", content: AGENT_SYSTEM }]);
 }
