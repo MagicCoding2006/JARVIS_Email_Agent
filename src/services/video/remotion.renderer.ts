@@ -11,6 +11,7 @@ const log = createLogger("remotion");
 const FPS = 30;
 const ROOT = path.resolve(fileURLToPath(import.meta.url), "../../../../..");
 const REMOTION_DIR = path.join(ROOT, "remotion");
+const ENTRY_POINT = path.join(REMOTION_DIR, "src", "index.ts");
 
 /**
  * Render the final mp4 with Remotion. Composites the scene spec over the audio.
@@ -45,7 +46,7 @@ export async function renderWithRemotion(args: {
 
   await run(
     "npx",
-    ["remotion", "render", "LoomVideo", outPath, `--props=${propsPath}`, `--frames=0-${durationInFrames - 1}`],
+    ["remotion", "render", ENTRY_POINT, "LoomVideo", outPath, `--props=${propsPath}`, `--frames=0-${durationInFrames - 1}`],
     REMOTION_DIR,
   );
   log.info(`rendered ${outPath}`);

@@ -1,6 +1,6 @@
 import React from "react";
 import { Composition } from "remotion";
-import { LoomVideo, type LoomProps } from "./LoomVideo.js";
+import { LoomVideo, type LoomProps } from "./LoomVideo";
 
 const DEFAULT_PROPS: LoomProps = {
   fps: 30,

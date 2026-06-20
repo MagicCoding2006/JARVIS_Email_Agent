@@ -4,6 +4,7 @@ import { listCampaigns, createCampaign, setCampaignStatus, changeOffer, enrollLe
 import { genVariants, listVariants, prune } from "./variant.tools.js";
 import { evaluateExperiments, listHypotheses } from "./experiment.tools.js";
 import { draftStepTemplate, setStepTemplate } from "./template.tools.js";
+import { createVideoScript, renderVideoAsset } from "./video.tools.js";
 import {
   getLead,
   listHotLeads,
@@ -34,6 +35,7 @@ const TOOLS: Tool[] = [
   evaluateExperiments,
   draftStepTemplate,
   research,
+  createVideoScript,
   // high-risk actions (need approval under semi)
   createCampaign,
   setCampaignStatus,
@@ -44,6 +46,7 @@ const TOOLS: Tool[] = [
   discoverBusinessContactLeads,
   sourceLeads,
   sourceLeadsApify,
+  renderVideoAsset,
 ];
 
 const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
