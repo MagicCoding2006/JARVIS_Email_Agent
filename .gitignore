@@ -6,3 +6,7 @@ dist/
 *.log
 .DS_Store
 data/local/
+data/videos/*.mp4
+data/videos/*.wav
+remotion/out/
+remotion/public/
