@@ -34,12 +34,14 @@ import { runAutonomousCycle } from "../workers/autonomous-cycle.js";
 import { executeApproval, denyApproval } from "../agent/approvals.js";
 import { ApprovalsRepo, HypothesesRepo } from "../repositories/index.js";
 import { evaluateHypotheses } from "../services/experiments.service.js";
-import type { EventType, LeadStatus } from "../models/types.js";
+import type { EventType, LeadStatus, VideoPurpose } from "../models/types.js";
 
 const csv = (v: string | boolean | undefined) =>
   typeof v === "string" ? v.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
 
 const log = createLogger("cli");
+const DEFAULT_VIDEO_OFFER =
+  "When you can't get to the phone, our AI calls the lead back within 30 seconds, figures out what they need, and books the job straight to your calendar, then texts you the details, so the calls you used to lose to voicemail and your competitor turn into booked work on autopilot. You keep your number with nothing changing on Google or your website, we build and train the whole thing on your business in 48 hours, and in week one we even reactivate your old missed-call list to start booking jobs immediately. All for $197/month locked for life, no setup fee for founding operators, month-to-month. You don't pay a cent until it books your first job, and your phone rings exactly like it does today if our system is ever down.";
 
 // ── tiny flag parser ──────────────────────────────────────────────────────────
 interface Parsed {
@@ -337,14 +339,44 @@ async function cmdPruneVariants(p: Parsed) {
 
 async function cmdVideoScript(p: Parsed) {
   const email = str(p.flags.email);
-  const offer = str(p.flags.offer);
-  if (!email || !offer) throw new Error('usage: cli video-script --email <e> --offer "..." [--campaign <id>]');
-  const asset = await createVideoForLead({ leadEmail: email, offer, campaignId: str(p.flags.campaign) || undefined });
+  const offer = str(p.flags.offer, DEFAULT_VIDEO_OFFER);
+  if (!email) throw new Error('usage: cli video-script --email <e> [--offer "..."] [--campaign <id>] [--purpose cold|follow_up|appointment|proposal]');
+  const asset = await createVideoForLead({ leadEmail: email, offer, campaignId: str(p.flags.campaign) || undefined, purpose: parseVideoPurpose(p) });
   if (!asset) return;
   log.info(`watch URL: ${asset.watchUrl}`);
   log.info(`hook: ${asset.hook}`);
+  if (asset.context) log.info(`email context: ${asset.context}`);
   // eslint-disable-next-line no-console
   console.log(`\n--- script ---\n${asset.script}\n`);
+}
+
+async function cmdCreateVideo(p: Parsed) {
+  const email = str(p.flags.email);
+  const offer = str(p.flags.offer, DEFAULT_VIDEO_OFFER);
+  if (!email) throw new Error('usage: cli create-video --email <e> [--offer "..."] [--campaign <id>] [--purpose cold|follow_up|appointment|proposal]');
+
+  const asset = await createVideoForLead({ leadEmail: email, offer, campaignId: str(p.flags.campaign) || undefined, purpose: parseVideoPurpose(p) });
+  if (!asset) return;
+
+  log.info(`video id: ${asset._id}`);
+  log.info(`watch URL: ${asset.watchUrl}`);
+  log.info(`hook: ${asset.hook}`);
+  if (asset.context) log.info(`email context: ${asset.context}`);
+  // eslint-disable-next-line no-console
+  console.log(`\n--- script ---\n${asset.script}\n`);
+
+  const rendered = await produceVideo(asset._id);
+  log.info(`render status: ${rendered?.status ?? "unknown"} ${rendered?.videoUrl ?? ""}`);
+}
+
+function parseVideoPurpose(p: Parsed): VideoPurpose | undefined {
+  const raw = str(p.flags.purpose);
+  if (!raw) return undefined;
+  const allowed: VideoPurpose[] = ["cold", "follow_up", "appointment", "proposal"];
+  if (!allowed.includes(raw as VideoPurpose)) {
+    throw new Error(`invalid --purpose "${raw}" (use: ${allowed.join(", ")})`);
+  }
+  return raw as VideoPurpose;
 }
 
 async function cmdWeeklyReview() {
@@ -517,7 +549,8 @@ const HELP = `AI SDR CLI
   list-variants --campaign      variant leaderboard
   prune-variants --campaign     retire underperforming variants
   make-pixel --email --subject --body [--campaign]  Gmail compose snippet (manual send)
-  video-script --email --offer [--campaign]         generate a Loom/video script + tracked link
+  create-video --email [--offer] [--campaign] [--purpose]   create script + render MP4 in one command
+  video-script --email [--offer] [--campaign] [--purpose]   generate a Loom/video script + tracked link
   produce-video <videoId>       run TTS + scene spec + Remotion render for a scripted video
   chat --text "..."             ask the GLM agent (uses tools; high-risk = approval)
   agent-cycle                   run the autonomous daily brain now
@@ -561,6 +594,7 @@ async function run() {
     case "list-variants": await cmdListVariants(p); break;
     case "prune-variants": await cmdPruneVariants(p); break;
     case "make-pixel": await cmdMakePixel(p); break;
+    case "create-video": await cmdCreateVideo(p); break;
     case "video-script": await cmdVideoScript(p); break;
     case "produce-video": await cmdProduceVideo(p); break;
     case "chat": await cmdChat(p); break;

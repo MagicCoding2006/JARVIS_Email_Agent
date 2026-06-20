@@ -33,9 +33,10 @@ export async function renderWithRemotion(args: {
   const audioName = `${args.videoId}.wav`;
   await mkdir(path.join(REMOTION_DIR, "public"), { recursive: true });
   await copyFile(args.audioPath, path.join(REMOTION_DIR, "public", audioName));
+  const spec = await normalizeLocalAssets(args.videoId, args.spec);
 
   const durationInFrames = Math.max(1, Math.round(args.durationSec * FPS));
-  const props = { spec: args.spec, audioFile: audioName, fps: FPS, durationInFrames };
+  const props = { spec, audioFile: audioName, fps: FPS, durationInFrames };
 
   const propsPath = path.join(REMOTION_DIR, "out", `${args.videoId}.props.json`);
   await mkdir(path.dirname(propsPath), { recursive: true });
@@ -52,6 +53,30 @@ export async function renderWithRemotion(args: {
   );
   log.info(`rendered ${outPath}`);
   return outPath;
+}
+
+async function normalizeLocalAssets(videoId: string, spec: SceneSpec): Promise<SceneSpec> {
+  const next: SceneSpec = { ...spec, scenes: spec.scenes.map((s) => ({ ...s })) };
+  const copied = new Map<string, string>();
+
+  for (const scene of next.scenes) {
+    const src = scene.bgImageUrl;
+    if (!src || /^https?:\/\//i.test(src) || /^data:/i.test(src)) continue;
+
+    const localPath = src.startsWith("file://") ? new URL(src).pathname : src;
+    if (!path.isAbsolute(localPath)) continue;
+
+    let publicName = copied.get(localPath);
+    if (!publicName) {
+      const ext = path.extname(localPath) || ".png";
+      publicName = `${videoId}-bg-${copied.size}${ext}`;
+      await copyFile(localPath, path.join(REMOTION_DIR, "public", publicName));
+      copied.set(localPath, publicName);
+    }
+    scene.bgImageUrl = publicName;
+  }
+
+  return next;
 }
 
 function run(cmd: string, argv: string[], cwd: string): Promise<void> {

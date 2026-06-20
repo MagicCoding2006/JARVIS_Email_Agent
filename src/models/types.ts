@@ -241,14 +241,25 @@ export interface Hypothesis {
 
 export type VideoStatus = "scripted" | "rendering" | "rendered" | "uploaded" | "failed";
 
+/**
+ * Where in the funnel a video is used. Cold videos are first-touch; the rest are
+ * "warm" follow-ups (appointment confirmations, proposal walkthroughs) that play
+ * off established trust and tend to convert better.
+ */
+export type VideoPurpose = "cold" | "follow_up" | "appointment" | "proposal";
+
 export interface VideoAsset {
   _id: string;
   leadId: string;
   campaignId?: string;
+  /** Funnel stage this video is for (defaults to cold first-touch). */
+  purpose?: VideoPurpose;
   /** AI-generated personalized script. */
   script: string;
   /** Short hook used as the email's CTA text. */
   hook: string;
+  /** Supporting email line giving the video context ("I made this to address X"). */
+  context?: string;
   status: VideoStatus;
   /** Final hosted video URL (set once rendered/uploaded). */
   videoUrl?: string;

@@ -16,16 +16,17 @@ const DEFAULT_PROPS: LoomProps = {
 export const RemotionRoot: React.FC = () => {
   return (
     <Composition
+      schema={undefined}
       id="LoomVideo"
-      component={LoomVideo}
+      component={LoomVideo as unknown as React.FC<Record<string, unknown>>}
       durationInFrames={DEFAULT_PROPS.durationInFrames}
       fps={DEFAULT_PROPS.fps}
       width={1280}
       height={720}
       defaultProps={DEFAULT_PROPS}
       calculateMetadata={({ props }) => ({
-        durationInFrames: props.durationInFrames,
-        fps: props.fps,
+        durationInFrames: Number(props.durationInFrames) || DEFAULT_PROPS.durationInFrames,
+        fps: Number(props.fps) || DEFAULT_PROPS.fps,
       })}
     />
   );

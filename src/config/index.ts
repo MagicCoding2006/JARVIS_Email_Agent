@@ -158,6 +158,8 @@ export const config = {
   video: {
     outputDir: opt("VIDEO_OUTPUT_DIR", "data/videos"),
     enableRemotion: bool("VIDEO_ENABLE_REMOTION", false),
+    captureWebsite: bool("VIDEO_CAPTURE_WEBSITE", true),
+    chromePath: opt("VIDEO_CHROME_PATH"),
   },
 } as const;
 
