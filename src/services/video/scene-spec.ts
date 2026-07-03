@@ -7,6 +7,8 @@ export interface Scene {
   durationSec: number;
   headline: string;
   subtext?: string;
+  /** Tiny act label above the headline, e.g. "THE PROBLEM" / "THE FIX". */
+  kicker?: string;
   /** The single keyword/stat in the headline to emphasize in the brand color. */
   highlight?: string;
   /** Optional data callouts drawn as animated stats. */
@@ -29,6 +31,9 @@ export interface SceneSpec {
   websiteUrl?: string;
   /** Company logo URL drawn in the corner so the prospect sees it's tailored for them. */
   logoUrl?: string;
+  /** Booking link — the composition renders a pulsing CTA button on the last scene. */
+  ctaUrl?: string;
+  ctaLabel?: string;
   captions?: CaptionCue[];
   scenes: Scene[];
 }
@@ -50,6 +55,9 @@ export async function generateSceneSpec(args: {
   brandColor?: string;
   dataPoints?: { label: string; value: string }[];
   bgImageUrl?: string;
+  /** Booking link (e.g. config.booking.url) — rendered as the closing CTA button. */
+  ctaUrl?: string;
+  ctaLabel?: string;
 }): Promise<SceneSpec> {
   const fallback: SceneSpec = {
     title: args.companyName ? `Quick idea for ${args.companyName}` : "Quick intro",
@@ -58,6 +66,8 @@ export async function generateSceneSpec(args: {
     companyName: args.companyName,
     websiteUrl: args.websiteUrl,
     logoUrl: args.logoUrl,
+    ctaUrl: args.ctaUrl,
+    ctaLabel: args.ctaLabel,
     captions: buildCaptions(args.script, args.durationSec),
     scenes: [
       {
@@ -73,12 +83,16 @@ export async function generateSceneSpec(args: {
 
   const system = `You are a motion-graphics director for short personalized "Loom-style" sales videos.
 Split the voiceover into 3-5 scenes that sync to it. Keep the screen simple: ONE bold, short phrase per scene (max ~6 words) so the viewer reads it instantly and listens to the voiceover for the rest. Let the detail live in the voiceover, not on screen.
-For each scene give a "highlight": the single most important keyword or stat inside that headline (e.g. "30 seconds", "no setup fee", "booked jobs", "$10,000") that we will paint in the brand color. Keep subtext rare and very short, or omit it.
+For each scene give:
+- "kicker": a 1-3 word act label drawn as a small badge above the headline, telling the story arc across scenes (e.g. "The problem" → "The cost" → "The fix" → "The ask"). Omit it on the first scene.
+- "highlight": the single most important keyword or stat inside that headline (e.g. "30 seconds", "no setup fee", "booked jobs", "$10,000") that we will paint in the brand color.
+- "dataPoints": at most ONE stat card per scene, and only when there is a REAL number or state worth showing. Repeating the same stat across scenes is worse than none.
+Keep subtext rare and very short, or omit it.
 Personalization is about relevance, not fill-in-the-blank: make every headline hyper-relevant to this prospect's specific segment and its real challenges, even if the visual shell stays consistent.
 The first scene must feel personally addressed (use the prospect/company name on screen as a variable field), not generic.
-If a website background is available, use it on the first 1-2 scenes only; later scenes can be cleaner offer/CTA scenes.
+The LAST scene is the ask: its headline is a direct, low-friction invitation (a booking button is drawn under it automatically when a link exists).
 Total scene duration must equal the provided audio duration. Return ONLY JSON:
-{"title":"...","accent":"#hex","scenes":[{"durationSec":number,"headline":"short","highlight":"keyword","subtext":"optional","dataPoints":[{"label":"..","value":".."}]}]}`;
+{"title":"...","accent":"#hex","scenes":[{"durationSec":number,"kicker":"The cost","headline":"short","highlight":"keyword","subtext":"optional","dataPoints":[{"label":"..","value":".."}]}]}`;
   const user = `Audio duration: ${args.durationSec.toFixed(1)}s
 Prospect name: ${args.prospectName ?? "unknown"}
 Company: ${args.companyName ?? "unknown"}
@@ -97,8 +111,11 @@ ${args.bgImageUrl ? `Background image available: ${args.bgImageUrl}` : ""}`;
     spec.companyName = args.companyName;
     spec.websiteUrl = args.websiteUrl;
     spec.logoUrl = args.logoUrl;
+    spec.ctaUrl = args.ctaUrl;
+    spec.ctaLabel = args.ctaLabel;
     spec.captions = buildCaptions(args.script, args.durationSec);
-    if (args.bgImageUrl) spec.scenes.forEach((s) => (s.bgImageUrl ??= args.bgImageUrl));
+    // Website backdrop belongs to the opening 1-2 scenes; later scenes stay clean.
+    if (args.bgImageUrl) spec.scenes.forEach((s, i) => (s.bgImageUrl = i <= 1 ? args.bgImageUrl : undefined));
     normalizeDurations(spec, args.durationSec);
     return spec;
   } catch (err) {
@@ -139,11 +156,15 @@ function buildCaptions(script: string, durationSec: number): CaptionCue[] {
   }
   if (current.length) chunks.push(current);
 
+  // Weight cue durations by character count, not word count — "a quick call"
+  // and "$30,000 in roofing jobs" take very different amounts of breath.
+  const totalChars = words.reduce((sum, w) => sum + w.length + 1, 0);
   let cursor = 0;
   return chunks.map((chunk, index) => {
     const isLast = index === chunks.length - 1;
-    const share = chunk.length / words.length;
-    const cueDuration = isLast ? durationSec - cursor : Math.max(1.2, durationSec * share);
+    const chunkChars = chunk.reduce((sum, w) => sum + w.length + 1, 0);
+    const share = chunkChars / totalChars;
+    const cueDuration = isLast ? durationSec - cursor : Math.max(1.0, durationSec * share);
     const startSec = cursor;
     const endSec = Math.min(durationSec, cursor + cueDuration);
     cursor = endSec;

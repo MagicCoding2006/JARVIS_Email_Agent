@@ -8,6 +8,10 @@ import { runDailyCycle } from "./daily-cycle.js";
 import { runAutonomousCycle } from "./autonomous-cycle.js";
 import { runWeeklyReview } from "./weekly-review.js";
 import { runMonthlyReview } from "./monthly-review.js";
+import { processReplyDrafts } from "./reply-drafts.js";
+import { runHumanDigest } from "./human-digest.js";
+import { syncMeetings } from "./meeting-lifecycle.js";
+import { calendlyEnabled } from "../services/calendly.service.js";
 import { imapEnabled, pollReplies } from "../services/imap-poller.service.js";
 
 const log = createLogger("scheduler");
@@ -29,6 +33,25 @@ export function startScheduler(): cron.ScheduledTask[] {
       processEvents().catch((err) => log.error("event job failed", err));
     }),
   );
+
+  // Draft responses to fresh positive replies (worker LLM, batch). A hot reply
+  // gets a one-tap-approve draft in Telegram within ~15 minutes; costs nothing
+  // when there are no new replies.
+  tasks.push(
+    cron.schedule("*/15 * * * *", () => {
+      processReplyDrafts().catch((err) => log.error("reply-draft job failed", err));
+    }),
+  );
+
+  // Calendly meeting lifecycle (hourly): backfill booked meetings, send ~24h
+  // reminders, record marked no-shows + queue rebooking drafts.
+  if (calendlyEnabled()) {
+    tasks.push(
+      cron.schedule("10 * * * *", () => {
+        syncMeetings().catch((err) => log.error("meeting sync failed", err));
+      }),
+    );
+  }
 
   // Poll mailboxes for replies over IMAP (every minute) when enabled. The
   // poller guards against overlapping runs and no-ops without credentials.
@@ -57,6 +80,13 @@ export function startScheduler(): cron.ScheduledTask[] {
     }),
   );
 
+  // Monday operator digest (08:00) — the "what needs a human this week" ping.
+  tasks.push(
+    cron.schedule("0 8 * * 1", () => {
+      runHumanDigest().catch((err) => log.error("human digest failed", err));
+    }),
+  );
+
   // Monthly review (1st of the month, 09:30).
   tasks.push(
     cron.schedule("30 9 1 * *", () => {
@@ -65,7 +95,7 @@ export function startScheduler(): cron.ScheduledTask[] {
   );
 
   log.info(
-    `scheduler started (dispatch /5m, events /10m${imapEnabled() ? ", imap /1m" : ""}, daily 08:30, weekly Mon 09:00, monthly 1st 09:30)`,
+    `scheduler started (dispatch /5m, events /10m, reply-drafts /15m${imapEnabled() ? ", imap /1m" : ""}${calendlyEnabled() ? ", meetings /1h" : ""}, daily 08:30, digest Mon 08:00, weekly Mon 09:00, monthly 1st 09:30)`,
   );
   return tasks;
 }

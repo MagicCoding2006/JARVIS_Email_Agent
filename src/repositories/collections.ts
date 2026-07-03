@@ -13,6 +13,8 @@ import type {
   VideoAsset,
   Approval,
   MailboxState,
+  PlaybookNote,
+  SendPaceOverride,
 } from "../models/types.js";
 
 const log = createLogger("db");
@@ -29,6 +31,8 @@ export const COLLECTIONS = {
   videos: "videos",
   approvals: "approvals",
   mailboxStates: "mailbox_states",
+  playbookNotes: "playbook_notes",
+  sendPace: "send_pace",
 } as const;
 
 export interface Collections {
@@ -43,6 +47,8 @@ export interface Collections {
   videos: Collection<VideoAsset>;
   approvals: Collection<Approval>;
   mailboxStates: Collection<MailboxState>;
+  playbookNotes: Collection<PlaybookNote>;
+  sendPace: Collection<SendPaceOverride>;
 }
 
 export async function getCollections(): Promise<Collections> {
@@ -59,6 +65,8 @@ export async function getCollections(): Promise<Collections> {
     videos: db.collection<VideoAsset>(COLLECTIONS.videos),
     approvals: db.collection<Approval>(COLLECTIONS.approvals),
     mailboxStates: db.collection<MailboxState>(COLLECTIONS.mailboxStates),
+    playbookNotes: db.collection<PlaybookNote>(COLLECTIONS.playbookNotes),
+    sendPace: db.collection<SendPaceOverride>(COLLECTIONS.sendPace),
   };
 }
 
@@ -81,6 +89,7 @@ export async function ensureIndexes(): Promise<void> {
     c.messages.createIndex({ enrollmentId: 1, step: 1 }),
     c.messages.createIndex({ "links.linkId": 1 }),
     c.messages.createIndex({ fromEmail: 1, status: 1, sentAt: 1 }),
+    c.messages.createIndex({ toDomain: 1, status: 1, sentAt: 1 }),
     c.messages.createIndex({ messageIdHeader: 1 }, { sparse: true }),
 
     c.events.createIndex({ leadId: 1, timestamp: -1 }),
@@ -93,6 +102,8 @@ export async function ensureIndexes(): Promise<void> {
     c.notifications.createIndex({ createdAt: -1 }),
     c.videos.createIndex({ leadId: 1 }),
     c.approvals.createIndex({ status: 1, createdAt: -1 }),
+    c.playbookNotes.createIndex({ createdAt: -1 }),
+    c.playbookNotes.createIndex({ tags: 1 }),
   ]);
   log.info("indexes ensured");
 }

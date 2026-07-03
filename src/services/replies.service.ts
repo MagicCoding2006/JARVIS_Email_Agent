@@ -82,7 +82,7 @@ export async function handleInboundReply(args: {
     campaignId,
     enrollmentId,
     messageId: args.messageId,
-    metadata: { summary: result.summary, suggestedReply: result.suggestedReply },
+    metadata: { text: args.text, summary: result.summary, suggestedReply: result.suggestedReply },
   });
 
   await applyReplyOutcome(lead, result);

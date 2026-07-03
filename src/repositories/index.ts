@@ -21,6 +21,8 @@ import type {
   Approval,
   ApprovalStatus,
   MailboxState,
+  PlaybookNote,
+  SendPaceOverride,
 } from "../models/types.js";
 
 const now = () => new Date();
@@ -268,6 +270,12 @@ export const EnrollmentsRepo = {
     );
   },
 
+  /** Enrollments created since `since` — bounds the agent's auto_enroll budget. */
+  async countEnrolledSince(since: Date): Promise<number> {
+    const c = await getCollections();
+    return c.enrollments.countDocuments({ enrolledAt: { $gte: since } });
+  },
+
   /** Stop all active enrollments for a lead (e.g. on reply or unsubscribe). */
   async stopAllForLead(leadId: string, status: EnrollmentStatus, reason: string): Promise<number> {
     const c = await getCollections();
@@ -281,9 +289,10 @@ export const EnrollmentsRepo = {
 
 // ── Messages ─────────────────────────────────────────────────────────────────
 export const MessagesRepo = {
-  async create(input: Omit<Message, "createdAt" | "updatedAt">): Promise<Message> {
+  async create(input: Omit<Message, "createdAt" | "updatedAt" | "toDomain">): Promise<Message> {
     const c = await getCollections();
-    const doc: Message = { ...input, createdAt: now(), updatedAt: now() };
+    const toDomain = input.toEmail.split("@")[1]?.trim().toLowerCase() ?? "";
+    const doc: Message = { ...input, toDomain, createdAt: now(), updatedAt: now() };
     await c.messages.insertOne(doc);
     return doc;
   },
@@ -346,6 +355,12 @@ export const MessagesRepo = {
   async countSentSinceFrom(since: Date, fromEmail: string): Promise<number> {
     const c = await getCollections();
     return c.messages.countDocuments({ status: "sent", sentAt: { $gte: since }, fromEmail });
+  },
+
+  /** Count messages sent since `since` to a specific recipient domain (per-domain cap accounting). */
+  async countSentSinceToDomain(since: Date, domain: string): Promise<number> {
+    const c = await getCollections();
+    return c.messages.countDocuments({ status: "sent", sentAt: { $gte: since }, toDomain: domain });
   },
 
   /** Timestamp of the first send ever from a mailbox — anchors the warmup ramp. */
@@ -431,6 +446,32 @@ export const EventsRepo = {
   async recentForLead(leadId: string, limit = 50): Promise<Event[]> {
     const c = await getCollections();
     return c.events.find({ leadId }).sort({ timestamp: -1 }).limit(limit).toArray();
+  },
+
+  /** Actionable inbound replies that don't yet have a response draft queued. */
+  async findRepliesNeedingDraft(since: Date, limit = 20): Promise<Event[]> {
+    const c = await getCollections();
+    return c.events
+      .find({
+        type: { $in: ["positive_reply", "request_info"] as EventType[] },
+        timestamp: { $gte: since },
+        "metadata.draftApprovalId": { $exists: false },
+      })
+      .sort({ timestamp: 1 })
+      .limit(limit)
+      .toArray();
+  },
+
+  async setMetadataField(id: string, key: string, value: unknown): Promise<void> {
+    const c = await getCollections();
+    await c.events.updateOne({ _id: id }, { $set: { [`metadata.${key}`]: value } });
+  },
+
+  /** Dedup check: has an event of this type with this metadata value already been recorded? */
+  async existsWithMetadata(type: EventType, key: string, value: unknown): Promise<boolean> {
+    const c = await getCollections();
+    const found = await c.events.findOne({ type, [`metadata.${key}`]: value }, { projection: { _id: 1 } });
+    return Boolean(found);
   },
 
   async countByTypeSince(since: Date): Promise<Record<string, number>> {
@@ -651,6 +692,53 @@ export const NotificationsRepo = {
     const doc: NotificationLog = { _id: uuid(), createdAt: now(), ...input };
     await c.notifications.insertOne(doc);
     return doc;
+  },
+};
+
+// ── Playbook (persistent strategist notes) ──────────────────────────────────
+export const PlaybookRepo = {
+  async add(text: string, tags: string[] = [], createdBy: "agent" | "human" = "agent"): Promise<PlaybookNote> {
+    const c = await getCollections();
+    const doc: PlaybookNote = { _id: uuid(), text, tags, createdBy, createdAt: now() };
+    await c.playbookNotes.insertOne(doc);
+    return doc;
+  },
+
+  /** Most recent notes, newest first — fed back to the strategist each cycle. */
+  async list(limit = 30): Promise<PlaybookNote[]> {
+    const c = await getCollections();
+    return c.playbookNotes.find({}).sort({ createdAt: -1 }).limit(limit).toArray();
+  },
+
+  async listByTag(tag: string, limit = 30): Promise<PlaybookNote[]> {
+    const c = await getCollections();
+    return c.playbookNotes.find({ tags: tag }).sort({ createdAt: -1 }).limit(limit).toArray();
+  },
+};
+
+// ── Send pace override (agent-tunable, clamped by services/send-pace.service) ─
+export const SendPaceRepo = {
+  async get(): Promise<SendPaceOverride | null> {
+    const c = await getCollections();
+    return c.sendPace.findOne({ _id: "send_pace" });
+  },
+
+  async set(patch: Pick<SendPaceOverride, "reason" | "updatedBy"> & {
+    maxPerRun?: number;
+    dailyCeiling?: number;
+  }): Promise<SendPaceOverride> {
+    const c = await getCollections();
+    await c.sendPace.updateOne(
+      { _id: "send_pace" },
+      { $set: { ...patch, updatedAt: now() } },
+      { upsert: true },
+    );
+    return (await c.sendPace.findOne({ _id: "send_pace" }))!;
+  },
+
+  async reset(): Promise<void> {
+    const c = await getCollections();
+    await c.sendPace.deleteOne({ _id: "send_pace" });
   },
 };
 

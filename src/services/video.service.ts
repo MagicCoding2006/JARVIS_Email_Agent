@@ -56,7 +56,7 @@ Use a Pain -> Agitation -> Solution -> CTA flow:
    - Anti-Pitch: admit it is a cold video, say what it is about in five words or less, and give them permission to close it if it is not relevant.
 2) AGITATION. One short line twisting the knife: the cost of inaction, the competitor who answered first, the lead that went cold.
 3) SOLUTION (outcome, not features). Describe the RESULT for the owner, not a feature list. Energy to match: "Imagine never missing a lead again. The AI answers in under 30 seconds, qualifies the homeowner, and books the job straight to your calendar. You just show up and quote." Use at most two concrete proof points from the offer. Do NOT recite every feature.
-4) CTA. Low-risk consultation, not a hard sell. Offer to show a blueprint of how you would set it up for their workflow, and ask for about five minutes this week.
+4) CTA. Low-risk demo, not a hard sell. The call IS the demo: offer to show it working on their workflow, live, and ask for about ${config.booking.meetingMinutes} minutes this week.
 
 ${purposeGuidance(purpose)}
 
@@ -106,7 +106,7 @@ function deterministicVideoScript(
     ? `At about $${avgJob.toLocaleString("en-US")} a job, every few calls that hit voicemail is real money handed to whoever answered first.`
     : `In ${segment}, the first company to answer usually wins the job, so every call that hits voicemail is money walking to a competitor.`;
   return {
-    script: `${greeting} how much work are you losing to missed calls every week? ${loss} Imagine never missing a lead again: our AI answers in under 30 seconds, qualifies the homeowner, and books the job straight to your calendar, so you just show up and quote. I mapped out how this would run on your current setup. Do you have five minutes this week to take a look?`,
+    script: `${greeting} how much work are you losing to missed calls every week? ${loss} Imagine never missing a lead again: our AI answers in under 30 seconds, qualifies the homeowner, and books the job straight to your calendar, so you just show up and quote. I can show it working on your setup, live. Do you have ${config.booking.meetingMinutes} minutes this week to take a look?`,
     hook: `quick video for ${recipient}`,
     context: `I made this video specifically to address the calls slipping past ${lead.company ?? "your team"} to voicemail.`,
   };
@@ -265,6 +265,8 @@ export async function produceVideo(
       brandColor: visuals.brandColor,
       dataPoints: opts.dataPoints,
       bgImageUrl: opts.bgImageUrl ?? visuals.screenshotPath,
+      ctaUrl: config.booking.url || undefined,
+      ctaLabel: config.booking.ctaLabel || `Book a ${config.booking.meetingMinutes}-min demo`,
     });
     const mp4 = await renderWithRemotion({ videoId, spec, audioPath, durationSec });
     await VideosRepo.setStatus(videoId, "uploaded", `file://${mp4}`);

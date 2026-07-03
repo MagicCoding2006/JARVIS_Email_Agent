@@ -1,3 +1,4 @@
+import { config } from "../config/index.js";
 import { worker } from "../llm/roles.js";
 import {
   buildSlotFillPrompt,
@@ -124,6 +125,7 @@ function mergeMap(lead: Lead): Map<string, string> {
   set("industry", lead.industry);
   set("website", lead.website);
   set("email", lead.email);
+  set("bookingUrl", config.booking.url);
   for (const [k, v] of Object.entries(lead.customFields ?? {})) set(k, v);
   return map;
 }

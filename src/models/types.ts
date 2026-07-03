@@ -147,6 +147,8 @@ export interface Message {
   bodyText: string;
   fromEmail: string;
   toEmail: string;
+  /** Lowercased domain of toEmail, derived at creation — powers per-domain send caps. */
+  toDomain: string;
   status: MessageStatus;
   scheduledAt: Date;
   sentAt?: Date;
@@ -304,3 +306,31 @@ export type ReplyClassification =
   | "out_of_office"
   | "not_interested"
   | "request_info";
+
+/**
+ * A durable conclusion the strategist (or a human) records so it survives past
+ * a single chat session — read back at the start of every agent cycle.
+ */
+export interface PlaybookNote {
+  _id: string;
+  text: string;
+  /** Free-form labels for filtering, e.g. a campaign name or segment. */
+  tags: string[];
+  createdBy: "agent" | "human";
+  createdAt: Date;
+}
+
+/**
+ * Single-doc override of the sending pace, set via the agent's set_send_pace
+ * tool (or by a human). Values are clamped to config.agent.maxPerRunCeiling /
+ * dailySendCeiling on write, and composed with — never replace — per-mailbox
+ * warmup caps and the per-recipient-domain cap.
+ */
+export interface SendPaceOverride {
+  _id: "send_pace";
+  maxPerRun?: number;
+  dailyCeiling?: number;
+  reason: string;
+  updatedBy: string;
+  updatedAt: Date;
+}

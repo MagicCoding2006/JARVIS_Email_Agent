@@ -545,6 +545,9 @@ const HELP = `AI SDR CLI
   daily-cycle                   run the strategist review + generate variants now
   weekly-review                 industry/persona/variant review + prune now
   monthly-review                monthly totals + review now
+  reply-drafts                  draft responses to fresh positive replies now (queues approvals)
+  human-digest                  send the Monday operator digest now
+  sync-meetings                 Calendly sync now: backfill booked, reminders, no-show recovery
   gen-variants --campaign [--step 1] [--count 3]   AI-generate A/B test variants
   list-variants --campaign      variant leaderboard
   prune-variants --campaign     retire underperforming variants
@@ -590,6 +593,25 @@ async function run() {
     case "daily-cycle": await cmdDailyCycle(); break;
     case "weekly-review": await cmdWeeklyReview(); break;
     case "monthly-review": await cmdMonthlyReview(); break;
+    case "reply-drafts": {
+      const { processReplyDrafts } = await import("../workers/reply-drafts.js");
+      const r = await processReplyDrafts();
+      log.info(`reply drafts: ${r.drafted} queued for approval, ${r.skipped} skipped`);
+      break;
+    }
+    case "human-digest": {
+      const { runHumanDigest } = await import("../workers/human-digest.js");
+      console.log(await runHumanDigest());
+      break;
+    }
+    case "sync-meetings": {
+      const { syncMeetings } = await import("../workers/meeting-lifecycle.js");
+      const r = await syncMeetings();
+      log.info(
+        `meetings: ${r.meetings} seen, ${r.bookedBackfilled} booked backfilled, ${r.remindersSent} reminders sent, ${r.noShowsRecorded} no-shows recorded`,
+      );
+      break;
+    }
     case "gen-variants": await cmdGenVariants(p); break;
     case "list-variants": await cmdListVariants(p); break;
     case "prune-variants": await cmdPruneVariants(p); break;

@@ -65,7 +65,7 @@ Key CLI verbs: `import-leads`, `create-campaign`, `enroll`, `dispatch`,
 `chat`, `agent-cycle`, `discover-leads`, `discover-businesses`,
 `discover-contractors`, `verify-email`, `source-leads`, `research`,
 `crm`, `crm-export`, `approvals`, `approve`/`deny`, `ingest-reply`,
-`event`, `status`, `lead`.
+`reply-drafts`, `human-digest`, `sync-meetings`, `event`, `status`, `lead`.
 
 Chat with the brain from the terminal: `npm run cli chat --text "how are we doing?"`.
 Run the autonomous daily brain on demand: `npm run cli agent-cycle`.
@@ -112,10 +112,22 @@ Full layer-by-layer status and the data model are in [ARCHITECTURE.md](./ARCHITE
 3. Prospect opens/clicks/replies/books → the **tracking server** writes `events`.
 4. `event-processor` (cron /10m) scores events, rolls stats into A/B `variants`,
    escalates hot leads, and stops the sequence on reply/unsubscribe/bounce/booked.
-5. Daily brain (08:30): if GLM is configured, `autonomous-cycle` runs the agent
-   (reviews + acts via tools; high-risk → approvals); otherwise the deterministic
-   `daily-cycle` runs. `weekly-review` prunes losers + breakdowns. `monthly-review`
-   summarizes outcomes. You can also drive everything live by chatting on Telegram.
+5. `reply-drafts` (cron /15m) turns fresh positive/info-request replies into
+   worker-LLM response drafts (booking link included when `BOOKING_URL` is set),
+   each queued as a Telegram approval — ✅ sends in-thread via the `send_reply`
+   tool from the lead's sticky mailbox. `meeting-lifecycle` (cron hourly, needs
+   `CALENDLY_API_TOKEN`) backfills booked meetings, auto-sends ~24h reminders,
+   and turns marked no-shows into rebooking-draft approvals. With `GITHUB_TOKEN`
+   + `WEBSITE_REPO` the agent can also read the landing page and propose copy
+   changes as pull requests (`site.tools.ts` — merge is the human gate).
+6. Daily brain (08:30): if GLM is configured, `autonomous-cycle` runs the agent
+   (reviews + acts via tools; high-risk → approvals). It reads its persistent
+   playbook (`playbook_notes`), keeps the funnel fed (`get_pipeline_inventory`,
+   `auto_enroll`, free `discover_leads` — all bounded by code-enforced daily
+   budgets), and can tune send pace within hard ceilings. Otherwise the
+   deterministic `daily-cycle` runs. `human-digest` (Mon 08:00) tells the
+   operator what needs a human; `weekly-review` prunes losers + breakdowns;
+   `monthly-review` summarizes outcomes. Drive everything live via Telegram.
 
 ## Conventions
 

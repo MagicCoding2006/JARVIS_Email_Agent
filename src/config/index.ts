@@ -65,6 +65,9 @@ export const config = {
     windowStartHour: num("SEND_WINDOW_START_HOUR", 8),
     windowEndHour: num("SEND_WINDOW_END_HOUR", 17),
     sendOnWeekends: bool("SEND_ON_WEEKENDS", false),
+    // Hard cap on sends per day to any single recipient domain (protects a
+    // target company's mail server / reputation with them). <=0 disables it.
+    maxPerRecipientDomainPerDay: num("MAX_SENDS_PER_RECIPIENT_DOMAIN_PER_DAY", 30),
   },
   mailboxes: {
     // Pool of sending mailboxes for rotation. JSON array (or a file path) of:
@@ -103,6 +106,34 @@ export const config = {
     webhookURL: opt("NOTIFY_WEBHOOK_URL"),
     email: opt("NOTIFY_EMAIL"),
   },
+  booking: {
+    // Public scheduling link (Calendly/Cal.com). When set, the writer model can
+    // close with it, reply drafts include it, and templates get a {{bookingUrl}}
+    // merge field. Clicks are tracked like any other link.
+    url: opt("BOOKING_URL"),
+    // The meeting length every ask references (emails, video scripts, CTA).
+    // MUST match your actual Calendly event length — asking for 5 and booking
+    // 15 erodes trust before the call starts.
+    meetingMinutes: num("MEETING_LENGTH_MIN", 15),
+    // CTA button text on videos; empty → "Book a <N>-min demo".
+    ctaLabel: opt("BOOKING_CTA_LABEL"),
+  },
+  calendly: {
+    // Personal Access Token (Calendly → Integrations → API & webhooks). Powers
+    // the meeting-lifecycle worker: booked-meeting backfill (webhook optional),
+    // pre-meeting reminder emails, and no-show recovery drafts.
+    apiToken: opt("CALENDLY_API_TOKEN"),
+    // Auto-send a reminder email ~24h before each meeting (transactional-style,
+    // to someone who booked — not cold outreach). Respects DRY_RUN.
+    remindersEnabled: bool("MEETING_REMINDERS", true),
+  },
+  website: {
+    // GitHub access to your marketing site so the agent can read the landing
+    // page and PROPOSE copy changes as pull requests (never merges).
+    githubToken: opt("GITHUB_TOKEN"),
+    repo: opt("WEBSITE_REPO"), // "owner/name"
+    branch: opt("WEBSITE_BRANCH"), // default branch auto-detected when empty
+  },
   compliance: {
     companyName: opt("COMPANY_NAME", "Your Company"),
     companyAddress: opt("COMPANY_ADDRESS", ""),
@@ -120,6 +151,19 @@ export const config = {
     maxSteps: num("AGENT_MAX_STEPS", 8),
     // Hard ceiling on paid lead-sourcing per agent action, regardless of autonomy.
     maxLeadsPerSource: num("AGENT_MAX_LEADS_PER_SOURCE", 25),
+    // Hard ceilings the agent's set_send_pace tool can never exceed, however it
+    // is configured (see services/send-pace.service.ts). Real sends are still
+    // further bounded by per-mailbox warmup caps and maxPerRecipientDomainPerDay,
+    // neither of which the agent can touch at all.
+    maxPerRunCeiling: num("AGENT_MAX_PER_RUN_CEILING", 50),
+    dailySendCeiling: num("AGENT_DAILY_SEND_CEILING", 200),
+    // Hard daily cap on auto_enroll (enrollments/day across ALL sources) so the
+    // agent can keep the funnel fed without a human, but never floods it.
+    autoEnrollPerDay: num("AGENT_AUTO_ENROLL_PER_DAY", 200),
+    // Hard daily cap on leads imported by FREE discovery (discover_leads etc.).
+    // Free sourcing is low-risk (no money spent, sends are capped separately),
+    // but this stops a runaway loop from stuffing the DB.
+    autoDiscoverPerDay: num("AGENT_AUTO_DISCOVER_PER_DAY", 50),
   },
   telegram: {
     botToken: opt("TELEGRAM_BOT_TOKEN"),
@@ -153,7 +197,7 @@ export const config = {
   gemini: {
     apiKey: opt("GEMINI_API_KEY"),
     ttsModel: opt("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts"),
-    ttsVoice: opt("GEMINI_TTS_VOICE", "Kore"),
+    ttsVoice: opt("GEMINI_TTS_VOICE", "Achird"),
   },
   video: {
     outputDir: opt("VIDEO_OUTPUT_DIR", "data/videos"),

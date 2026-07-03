@@ -76,3 +76,10 @@ export function nowInWindow(d = new Date()): boolean {
   const h = d.getHours();
   return h >= windowStartHour && h < windowEndHour;
 }
+
+/** Midnight (local time) of the given date — anchors "sent today" counters. */
+export function startOfDay(d: Date): Date {
+  const c = new Date(d);
+  c.setHours(0, 0, 0, 0);
+  return c;
+}

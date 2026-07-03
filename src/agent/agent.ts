@@ -6,6 +6,7 @@ import { allTools, getTool } from "./tools/index.js";
 import { toOpenAITool, type ToolContext } from "./tools/types.js";
 import { needsApproval } from "./autonomy.js";
 import { requestApproval } from "./approvals.js";
+import { PlaybookRepo } from "../repositories/index.js";
 
 const log = createLogger("agent");
 
@@ -24,6 +25,13 @@ Operating rules:
 - NEVER fabricate numbers. Call get_metrics / get_breakdowns / list_variants etc. to get real data before concluding.
 - Current autonomy is "${config.agent.autonomy}". When a tool returns {status:"pending_approval"}, it has NOT run — tell the user it's awaiting their approval and stop assuming it happened.
 - Prefer cheap, reversible experiments. When performance is weak, generate/prune variants, research leads, test templates, and propose new offers/segments.
+- You can tune sending aggressiveness with get_send_pace/set_send_pace (max sends per dispatch run, total daily ceiling). It's bounded — the tool clamps to hard ceilings the operator set, and per-mailbox warmup caps plus the per-recipient-domain cap are enforced in code and are NOT something you can change. Speed up on strong signal, pull back on weak reply/bounce quality, and always give a reason.
+- KEEP THE MACHINE FED: get_pipeline_inventory shows unenrolled leads, capacity, and your daily budgets. Use auto_enroll to keep active campaigns supplied and discover_leads (free) to refill the tank — both are budget-capped per day in code, so use them freely within budget. Paid sourcing and launching campaigns still need approval.
+- Replies are handled for you: a background job drafts responses to positive replies and queues them for the operator's one-tap approval. You can also draft one yourself with send_reply (it queues for approval; you never send prospect-facing mail directly).
+- MEETINGS ARE THE REAL METRIC: get_meetings (Calendly) shows upcoming/held/no-show and the show-rate. Judge campaigns by meetings held, not opens. Reminders and no-show recovery run automatically in the background.
+- THE FUNNEL INCLUDES THE WEBSITE: list_site_files/read_site_file let you see the landing page prospects hit after clicking; propose_site_change opens a GitHub PR for copy experiments (headline, CTA, social proof) — nothing goes live until the operator merges. Treat email + landing page as ONE funnel: if clicks are high but bookings low, the page is the suspect.
+- You have a persistent playbook (get_playbook/add_playbook_note) that survives across sessions. Check it early in a cycle so you build on past conclusions instead of re-deriving them. When you reach a durable conclusion worth remembering (a pattern, a rule, a decision and why), call add_playbook_note — don't let it live only in this chat.
+- If a missing tool blocks a decision or workflow, file a spec with propose_tool — the operator has requested tools built quickly. Don't silently work around the same gap every cycle.
 - Be concise and concrete in your final replies. Lead with the decision/finding, then 1-2 supporting facts.`;
 
 function safeParseArgs(s: string | undefined): Record<string, unknown> {
@@ -94,16 +102,23 @@ export async function runAgent(messages: Msg[], source: ToolContext["source"], a
 // ── Chat sessions (in-memory rolling history, isolated by chat/session id) ───
 const histories = new Map<string, Msg[]>();
 
-function getHistory(sessionId: string): Msg[] {
+async function getHistory(sessionId: string): Promise<Msg[]> {
   const existing = histories.get(sessionId);
   if (existing) return existing;
-  const fresh: Msg[] = [{ role: "system", content: AGENT_SYSTEM }];
+  const notes = await PlaybookRepo.list(20);
+  const playbook = notes.length
+    ? `Your playbook (past conclusions, newest first):\n${notes.map((n) => `- ${n.text}`).join("\n")}`
+    : "Your playbook is empty — no past conclusions recorded yet.";
+  const fresh: Msg[] = [
+    { role: "system", content: AGENT_SYSTEM },
+    { role: "user", content: playbook },
+  ];
   histories.set(sessionId, fresh);
   return fresh;
 }
 
 export async function handleChat(text: string, sessionId = "default", approvalChatId?: string): Promise<string> {
-  let history = getHistory(sessionId);
+  let history = await getHistory(sessionId);
   history.push({ role: "user", content: text });
   const reply = await runAgent(history, "chat", approvalChatId);
   // Trim to keep the system message + the last ~24 turns.
@@ -115,5 +130,7 @@ export async function handleChat(text: string, sessionId = "default", approvalCh
 }
 
 export function resetChat(sessionId = "default"): void {
-  histories.set(sessionId, [{ role: "system", content: AGENT_SYSTEM }]);
+  // Drop the cached history; the next getHistory() call rebuilds it fresh,
+  // including a re-fetch of the current playbook.
+  histories.delete(sessionId);
 }

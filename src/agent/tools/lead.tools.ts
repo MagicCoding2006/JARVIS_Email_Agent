@@ -1,4 +1,6 @@
 import { schema, type Tool } from "./types.js";
+import { config } from "../../config/index.js";
+import { startOfDay } from "../../lib/time.js";
 import { LeadsRepo, EventsRepo } from "../../repositories/index.js";
 import { webSearch } from "../../services/search.service.js";
 import { researchLead } from "../../services/research.service.js";
@@ -65,8 +67,9 @@ export const research: Tool = {
 export const discover: Tool = {
   name: "discover_leads",
   description:
-    "FREE lead sourcing (no Apollo needed): web-search for people matching a role/industry/company, derive their company email, verify it, and import deliverable leads. HIGH RISK (imports leads you'll email).",
-  risk: "high",
+    "FREE lead sourcing (no Apollo needed): web-search for people matching a role/industry/company, derive their company email, verify it, and import deliverable leads. " +
+    "Costs no money; bounded by a hard daily import cap (see get_pipeline_inventory). Use to refill the tank when unenrolled leads run low.",
+  risk: "low",
   parameters: schema(
     {
       role: { type: "string", description: "Target title, e.g. 'VP of Operations'" },
@@ -79,12 +82,22 @@ export const discover: Tool = {
     [],
   ),
   async run(args: { role?: string; industry?: string; company?: string; location?: string; keywords?: string; limit?: number }) {
-    const r = await discoverLeads(args);
+    // Code-enforced daily import budget — keeps "free and low-risk" honest.
+    const importedToday = await LeadsRepo.count({
+      source: "discovery",
+      createdAt: { $gte: startOfDay(new Date()) },
+    });
+    const budget = config.agent.autoDiscoverPerDay - importedToday;
+    if (budget <= 0) {
+      return { error: `today's discovery import budget (${config.agent.autoDiscoverPerDay}) is spent — try again tomorrow` };
+    }
+    const r = await discoverLeads({ ...args, limit: Math.min(args.limit ?? budget, budget) });
     return {
       searchResults: r.searchResults,
       consideredPeople: r.consideredPeople,
       imported: r.imported.length,
       leads: r.imported,
+      importBudgetRemainingToday: budget - r.imported.length,
     };
   },
 };

@@ -1,6 +1,6 @@
 import { config } from "../config/index.js";
 import { createLogger } from "../lib/logger.js";
-import { nowInWindow } from "../lib/time.js";
+import { nowInWindow, startOfDay } from "../lib/time.js";
 import { EnrollmentsRepo, EventsRepo, LeadsRepo, MessagesRepo } from "../repositories/index.js";
 import { getSender } from "../services/sender/index.js";
 import {
@@ -12,6 +12,7 @@ import {
 import { scheduleNextStep } from "../services/sequencer.service.js";
 import { trackingUrls } from "../services/tracking.service.js";
 import { checkSendingHealth, type SendingHealth } from "../services/sending-health.service.js";
+import { getSendPace } from "../services/send-pace.service.js";
 import { notify } from "../services/notifications.service.js";
 import type { Lead, Message } from "../models/types.js";
 
@@ -80,6 +81,7 @@ export async function dispatchDue(opts: DispatchOptions = {}): Promise<DispatchR
   }
 
   const dryRun = config.sending.dryRun;
+  const pace = await getSendPace();
 
   // Reputation guard: stop sending if the recent bounce rate has spiked.
   if (!dryRun) {
@@ -100,20 +102,37 @@ export async function dispatchDue(opts: DispatchOptions = {}): Promise<DispatchR
       remaining.set(email, cap.remaining);
       totalRemaining += cap.remaining;
     }
+    // The agent-tunable daily ceiling can only ever narrow this, never widen it
+    // past what mailboxes physically allow.
+    totalRemaining = Math.min(totalRemaining, pace.dailyCeiling);
     if (totalRemaining <= 0) {
       log.info("all mailboxes at warmup/daily cap — nothing to send");
       return { sent, skipped, failed, deferred };
     }
   } else {
-    totalRemaining = config.sending.maxPerRun;
+    totalRemaining = pace.maxPerRun;
   }
 
-  const batchSize = Math.min(config.sending.maxPerRun, totalRemaining);
-  // Over-fetch: some due messages may be deferred when their mailbox is full.
+  const batchSize = Math.min(pace.maxPerRun, totalRemaining);
+  // Over-fetch: some due messages may be deferred when their mailbox/domain is full.
   const due = await MessagesRepo.getDue(Math.min(batchSize * 4, 200));
   if (!due.length) return { sent, skipped, failed, deferred };
 
   log.info(`dispatching up to ${batchSize} of ${due.length} due message(s)`);
+
+  // Remaining capacity per recipient domain today — a hard cap the agent
+  // cannot change, protecting one target company's mail server/reputation
+  // from being hammered regardless of how aggressive the agent's pace is.
+  const domainCap = config.sending.maxPerRecipientDomainPerDay;
+  const domainRemaining = new Map<string, number>();
+  async function remainingForDomain(domain: string): Promise<number> {
+    if (domainCap <= 0) return Infinity;
+    if (!domainRemaining.has(domain)) {
+      const sentToday = await MessagesRepo.countSentSinceToDomain(startOfDay(new Date()), domain);
+      domainRemaining.set(domain, Math.max(0, domainCap - sentToday));
+    }
+    return domainRemaining.get(domain)!;
+  }
 
   for (const msg of due) {
     if (sent >= batchSize) break;
@@ -125,6 +144,12 @@ export async function dispatchDue(opts: DispatchOptions = {}): Promise<DispatchR
         deferred++; // leave it scheduled; a later run/day picks it up
         continue;
       }
+
+      const domain = msg.toDomain || msg.toEmail.split("@")[1]?.trim().toLowerCase() || "";
+      if (domain && (await remainingForDomain(domain)) <= 0) {
+        deferred++; // this recipient domain is at its daily cap
+        continue;
+      }
     }
 
     const ok = await sendOne(msg);
@@ -132,6 +157,10 @@ export async function dispatchDue(opts: DispatchOptions = {}): Promise<DispatchR
       sent++;
       if (!dryRun) {
         remaining.set(key, (remaining.get(key) ?? 1) - 1);
+        const domain = msg.toDomain || msg.toEmail.split("@")[1]?.trim().toLowerCase() || "";
+        if (domain && domainRemaining.has(domain)) {
+          domainRemaining.set(domain, domainRemaining.get(domain)! - 1);
+        }
         await sleep(config.sending.minSecondsBetweenSends * 1000);
       }
     } else if (ok === "skipped") {

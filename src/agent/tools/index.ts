@@ -5,6 +5,12 @@ import { genVariants, listVariants, prune } from "./variant.tools.js";
 import { evaluateExperiments, listHypotheses } from "./experiment.tools.js";
 import { draftStepTemplate, setStepTemplate } from "./template.tools.js";
 import { createVideoScript, renderVideoAsset } from "./video.tools.js";
+import { getSendPaceTool, setSendPaceTool } from "./pace.tools.js";
+import { getPlaybook, addPlaybookNote, proposeTool } from "./playbook.tools.js";
+import { getPipelineInventory, autoEnroll } from "./pipeline.tools.js";
+import { sendReply } from "./reply.tools.js";
+import { getMeetings } from "./meeting.tools.js";
+import { listSiteFiles, readSiteFile, proposeSiteChange } from "./site.tools.js";
 import {
   getLead,
   listHotLeads,
@@ -29,6 +35,12 @@ const TOOLS: Tool[] = [
   listHotLeads,
   search,
   verifyEmail,
+  getSendPaceTool,
+  getPlaybook,
+  getPipelineInventory,
+  getMeetings,
+  listSiteFiles,
+  readSiteFile,
   // low-risk actions (auto under semi)
   genVariants,
   prune,
@@ -36,13 +48,19 @@ const TOOLS: Tool[] = [
   draftStepTemplate,
   research,
   createVideoScript,
+  setSendPaceTool,
+  addPlaybookNote,
+  proposeTool,
+  autoEnroll,
+  discover,
+  proposeSiteChange,
   // high-risk actions (need approval under semi)
   createCampaign,
   setCampaignStatus,
   changeOffer,
   setStepTemplate,
   enrollLeads,
-  discover,
+  sendReply,
   discoverBusinessContactLeads,
   sourceLeads,
   sourceLeadsApify,

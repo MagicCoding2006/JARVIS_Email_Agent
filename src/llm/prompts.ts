@@ -1,3 +1,4 @@
+import { config } from "../config/index.js";
 import type { Campaign, Lead, SequenceStep } from "../models/types.js";
 
 export interface DraftedEmail {
@@ -54,6 +55,10 @@ export function buildPersonalizationPrompt(args: {
     ? `\nA/B VARIANT TO USE (this is the test arm — honor it):${variant.subjectLine ? `\nSubject line (use this or a very close variation): ${variant.subjectLine}` : ""}${variant.cta ? `\nCall to action: ${variant.cta}` : ""}${variant.tone ? `\nTone: ${variant.tone}` : ""}`
     : "";
 
+  const bookingBlock = config.booking.url
+    ? `\nBooking link (optional): ${config.booking.url}\nInclude it ONLY if this step's CTA is asking for a meeting/call — paste the bare URL on its own line. For softer CTAs (a question, a resource), leave it out.`
+    : "";
+
   const user = `Write email step ${step.step} of a ${campaign.sequence.length}-touch sequence.
 
 CAMPAIGN
@@ -64,7 +69,7 @@ THIS STEP
 Purpose: ${step.purpose}
 Angle: ${step.angle}
 Extra guidance: ${step.instructions}
-${variantBlock}
+${variantBlock}${bookingBlock}
 ${threadContext}
 
 PROSPECT
@@ -123,7 +128,7 @@ export function buildTemplateAuthorPrompt(args: {
 }): { system: string; user: string } {
   const system = `You are an elite B2B SDR who designs reusable cold-email TEMPLATES.
 A template is fixed copy you write yourself, plus placeholder SLOTS that get filled per-prospect at send time:
-- {{firstName|there}}      → a lead field (firstName,lastName,name,title,company,industry,website,email, or a custom field) with an optional |default
+- {{firstName|there}}      → a lead field (firstName,lastName,name,title,company,industry,website,email,bookingUrl, or a custom field) with an optional |default
 - {{ai: short instruction}} → the writer model fills this tailored fragment per prospect
 - {{research: task}}        → web research fills this factual fragment per prospect
 Rules:
@@ -180,6 +185,46 @@ Persona: ${args.campaign.targetPersona}
 Each under 50 chars, curiosity-driven, no clickbait, no emojis.
 Return ONLY JSON: {"subjects": ["...", "..."]}.`,
   };
+}
+
+/**
+ * Draft a response to a prospect's inbound reply. The goal is always the same:
+ * be genuinely helpful, then move to a booked call. Output is queued for human
+ * approval before anything sends.
+ */
+export function buildReplyDraftPrompt(args: {
+  lead: Lead;
+  replyText: string;
+  classification: string;
+  priorSubject?: string;
+  priorBody?: string;
+  offer?: string;
+}): { system: string; user: string } {
+  const system = `You are a friendly, sharp B2B seller answering a prospect who just replied to your cold email.
+Rules:
+- Answer their actual question/objection first — specifically, not with fluff.
+- Keep it SHORT (30-80 words). Plain text, no markdown/emojis. Human tone, like you typed it in 30 seconds.
+- End by moving toward a ${config.booking.meetingMinutes}-minute call.${config.booking.url ? ` Include this booking link on its own line: ${config.booking.url}` : " Suggest two concrete time windows."}
+- Never invent facts, pricing, or capabilities not in the OFFER below. If they asked for something you don't know, say you'll cover it on the call.
+Return ONLY JSON: {"body": "..."}.`;
+
+  const user = `PROSPECT: ${args.lead.name ?? args.lead.email}${args.lead.title ? `, ${args.lead.title}` : ""}${args.lead.company ? ` at ${args.lead.company}` : ""}
+
+OFFER: ${args.offer ?? "(not specified)"}
+
+OUR LAST EMAIL${args.priorSubject ? ` (subject: ${args.priorSubject})` : ""}:
+"""
+${args.priorBody ?? "(unavailable)"}
+"""
+
+THEIR REPLY (classified ${args.classification}):
+"""
+${args.replyText}
+"""
+
+Write the response body. Return ONLY the JSON object.`;
+
+  return { system, user };
 }
 
 export function buildReplyClassifyPrompt(replyText: string): { system: string; user: string } {
