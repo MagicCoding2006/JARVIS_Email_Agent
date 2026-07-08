@@ -112,7 +112,10 @@ export const enrollLeads: Tool = {
   async run(args: { campaign: string; status?: string; limit?: number }) {
     const c = await ensureCampaign(args.campaign);
     if (!c) return { error: `campaign not found: ${args.campaign}` };
-    const leads = await LeadsRepo.list({ status: (args.status ?? "new") as LeadStatus }, args.limit ?? 25);
+    const leads = await LeadsRepo.listUnenrolled(
+      (args.status ?? "new") as LeadStatus,
+      args.limit ?? 25,
+    );
     let created = 0;
     for (const l of leads) {
       const r = await enrollLead(l._id, c._id);
