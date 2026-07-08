@@ -73,7 +73,10 @@ export const autoEnroll: Tool = {
     }
 
     const take = Math.min(args.limit ?? budget, budget);
-    const leads = await LeadsRepo.list({ status: (args.status ?? "new") as LeadStatus }, take);
+    const leads = await LeadsRepo.listUnenrolled(
+      (args.status ?? "new") as LeadStatus,
+      take,
+    );
     let created = 0;
     for (const l of leads) {
       const r = await enrollLead(l._id, c._id);

@@ -136,6 +136,25 @@ export const LeadsRepo = {
     return c.leads.find(filter).sort({ score: -1 }).limit(limit).toArray();
   },
 
+  /**
+   * List leads by status, EXCLUDING any lead with an active enrollment.
+   * Fixes the bug where auto_enroll/enroll_leads return the same already-enrolled
+   * leads every call (enrollment doesn't change lead status from "new").
+   */
+  async listUnenrolled(status: LeadStatus, limit: number): Promise<Lead[]> {
+    const c = await getCollections();
+    const activeEnrollments = await c.enrollments
+      .find({ status: "active" })
+      .project({ leadId: 1, _id: 0 })
+      .toArray();
+    const enrolledIds = activeEnrollments.map((e) => e.leadId);
+    const filter: Record<string, unknown> = { status };
+    if (enrolledIds.length > 0) {
+      filter._id = { $nin: enrolledIds };
+    }
+    return c.leads.find(filter).sort({ score: -1, createdAt: -1 }).limit(limit).toArray();
+  },
+
   async count(filter: Record<string, unknown> = {}): Promise<number> {
     const c = await getCollections();
     return c.leads.countDocuments(filter);
