@@ -134,6 +134,12 @@ export const config = {
     repo: opt("WEBSITE_REPO"), // "owner/name"
     branch: opt("WEBSITE_BRANCH"), // default branch auto-detected when empty
   },
+  codeRepo: {
+    // Optional self-improvement lane. When set, the agent can inspect this code
+    // repo and propose multi-file pull requests, but never merges or deploys.
+    repo: opt("AGENT_CODE_REPO"),
+    branch: opt("AGENT_CODE_BRANCH"),
+  },
   compliance: {
     companyName: opt("COMPANY_NAME", "Your Company"),
     companyAddress: opt("COMPANY_ADDRESS", ""),

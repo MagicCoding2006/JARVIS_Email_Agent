@@ -11,6 +11,7 @@ import { getPipelineInventory, autoEnroll } from "./pipeline.tools.js";
 import { sendReply } from "./reply.tools.js";
 import { getMeetings } from "./meeting.tools.js";
 import { listSiteFiles, readSiteFile, proposeSiteChange } from "./site.tools.js";
+import { listCodeFiles, readCodeFile, proposeCodeChange } from "./code.tools.js";
 import {
   getLead,
   listHotLeads,
@@ -41,6 +42,8 @@ const TOOLS: Tool[] = [
   getMeetings,
   listSiteFiles,
   readSiteFile,
+  listCodeFiles,
+  readCodeFile,
   // low-risk actions (auto under semi)
   genVariants,
   prune,
@@ -55,6 +58,7 @@ const TOOLS: Tool[] = [
   discover,
   proposeSiteChange,
   // high-risk actions (need approval under semi)
+  proposeCodeChange,
   createCampaign,
   setCampaignStatus,
   changeOffer,
