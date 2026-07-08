@@ -12,6 +12,10 @@ const log = createLogger("agent");
 
 type Msg = OpenAI.Chat.ChatCompletionMessageParam;
 
+const CODE_TOOL_NAMES = new Set(["list_code_files", "read_code_file", "propose_code_change"]);
+const CODE_INTENT_RE =
+  /\b(code|coding|backend|repo|repository|github pr|pull request|implement|implementation|debug|fix bug|add a tool|new tool|build.*tool|self-improve|self improvement|read_code_file|list_code_files|propose_code_change)\b/i;
+
 export const AGENT_SYSTEM = `You are the autonomous SDR/BDR operator ("the brain") for a cold-email sales system.
 You run the funnel: leads, campaigns, multi-touch sequences, A/B experiments, lead research, and optimization.
 Division of labor: YOU (the strategist) make decisions and call tools; a separate WRITER model (GPT) writes the actual emails. You NEVER write prospect-facing email copy yourself — you delegate all writing to GPT. Keep your own chatter minimal to control cost.
@@ -46,7 +50,7 @@ Operating rules:
 - Replies are handled for you: a background job drafts responses to positive replies and queues them for the operator's one-tap approval. You can also draft one yourself with send_reply (it queues for approval; you never send prospect-facing mail directly).
 - MEETINGS ARE THE REAL METRIC: get_meetings (Calendly) shows upcoming/held/no-show and the show-rate. Judge campaigns by meetings held, not opens. Reminders and no-show recovery run automatically in the background.
 - THE FUNNEL INCLUDES THE WEBSITE: list_site_files/read_site_file let you see the landing page prospects hit after clicking; propose_site_change opens a GitHub PR for copy experiments (headline, CTA, social proof) — nothing goes live until the operator merges. Treat email + landing page as ONE funnel: if clicks are high but bookings low, the page is the suspect.
-- SELF-IMPROVEMENT IS PR-BASED: if AGENT_CODE_REPO is connected, list_code_files/read_code_file/propose_code_change let you inspect this agent's code and open a reviewable GitHub PR for small tool/code improvements. Use this only after reading the relevant files. Never claim a code change is live until the operator merges and redeploys it.
+- SELF-IMPROVEMENT IS PR-BASED: if AGENT_CODE_REPO is connected, list_code_files/read_code_file/propose_code_change let you inspect this agent's code and open a reviewable GitHub PR for small tool/code improvements. Use code tools ONLY when the operator explicitly asks you to build/change/debug code or when a missing backend tool blocks the task. For ordinary status, metrics, campaign, lead, email, meeting, website, or approval work, do not inspect code. Read the fewest files and smallest line windows needed. Never claim a code change is live until the operator merges and redeploys it.
 - You have a persistent playbook (get_playbook/add_playbook_note) that survives across sessions. Check it early in a cycle so you build on past conclusions instead of re-deriving them. When you reach a durable conclusion worth remembering (a pattern, a rule, a decision and why), call add_playbook_note — don't let it live only in this chat.
 - If a missing tool blocks a decision or workflow, file a spec with propose_tool — the operator has requested tools built quickly. Don't silently work around the same gap every cycle.
 - Be concise and concrete in your final replies. Lead with the decision/finding, then 1-2 supporting facts.`;
@@ -59,6 +63,28 @@ function safeParseArgs(s: string | undefined): Record<string, unknown> {
   }
 }
 
+function textContent(content: Msg["content"]): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (part && "text" in part && typeof part.text === "string") return part.text;
+      return "";
+    })
+    .join("\n");
+}
+
+function codeToolsAllowed(messages: Msg[], source: ToolContext["source"]): boolean {
+  if (source !== "chat") return false;
+  const recentUserText = messages
+    .filter((m) => m.role === "user")
+    .slice(-3)
+    .map((m) => textContent(m.content))
+    .join("\n");
+  return CODE_INTENT_RE.test(recentUserText);
+}
+
 /**
  * Core agent loop: the strategist model reasons with tools until it produces a
  * final text answer or hits the step cap. High-risk tool calls are intercepted
@@ -68,7 +94,9 @@ export async function runAgent(messages: Msg[], source: ToolContext["source"], a
   if (!strategist.configured) {
     return "Strategist LLM not configured — set STRATEGIST_API_KEY (GLM) to enable the agent.";
   }
-  const tools = allTools().map(toOpenAITool);
+  const allowCodeTools = codeToolsAllowed(messages, source);
+  const availableTools = allTools().filter((t) => allowCodeTools || !CODE_TOOL_NAMES.has(t.name));
+  const tools = availableTools.map(toOpenAITool);
 
   for (let step = 0; step < config.agent.maxSteps; step++) {
     const assistant = await strategist.chatWithTools(messages, tools);
@@ -81,10 +109,12 @@ export async function runAgent(messages: Msg[], source: ToolContext["source"], a
 
     for (const call of calls) {
       if (call.type !== "function") continue;
-      const tool = getTool(call.function.name);
+      const tool = availableTools.find((t) => t.name === call.function.name) ?? getTool(call.function.name);
       let result: unknown;
 
-      if (!tool) {
+      if (CODE_TOOL_NAMES.has(call.function.name) && !allowCodeTools) {
+        result = { error: "code tools are disabled for this request; ask explicitly for code/tool-building work" };
+      } else if (!tool) {
         result = { error: `unknown tool ${call.function.name}` };
       } else {
         const args = safeParseArgs(call.function.arguments);

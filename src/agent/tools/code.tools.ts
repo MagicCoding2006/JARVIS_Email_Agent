@@ -21,13 +21,13 @@ export const listCodeFiles: Tool = {
 export const readCodeFile: Tool = {
   name: "read_code_file",
   description:
-    "Read a file from the agent's code repo. Large files are windowed; use startLine/maxLines to inspect relevant sections before proposing changes.",
+    "Read a small window from a file in the agent's code repo. Use only when explicitly building/debugging code, and request the narrowest line range needed.",
   risk: "low",
   parameters: schema(
     {
       path: { type: "string" },
       startLine: { type: "number", description: "1-based first line (default 1)" },
-      maxLines: { type: "number", description: "Lines to return (default 160, max 300)" },
+      maxLines: { type: "number", description: "Lines to return (default 80, max 160)" },
     },
     ["path"],
   ),
@@ -36,13 +36,13 @@ export const readCodeFile: Tool = {
     const content = await readCodeRepoFile(args.path);
     const lines = content.split("\n");
     const start = Math.max(1, args.startLine ?? 1);
-    const max = Math.min(args.maxLines ?? 160, 300);
+    const max = Math.min(args.maxLines ?? 80, 160);
     return {
       path: args.path,
       totalLines: lines.length,
       showing: `lines ${start}-${Math.min(start + max - 1, lines.length)}`,
       truncated: lines.length > start - 1 + max,
-      content: lines.slice(start - 1, start - 1 + max).join("\n").slice(0, 8000),
+      content: lines.slice(start - 1, start - 1 + max).join("\n").slice(0, 4000),
     };
   },
 };
