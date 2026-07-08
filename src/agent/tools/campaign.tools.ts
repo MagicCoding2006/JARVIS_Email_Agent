@@ -1,6 +1,7 @@
 import { schema, type Tool } from "./types.js";
 import { CampaignsRepo, LeadsRepo } from "../../repositories/index.js";
 import { DEFAULT_SEQUENCE } from "../../services/sequences/default-sequence.js";
+import { NURTURE_SEQUENCE } from "../../services/sequences/nurture-sequence.js";
 import { enrollLead } from "../../services/sequencer.service.js";
 import { ensureCampaign } from "../../services/variants.service.js";
 import type { LeadStatus } from "../../models/types.js";
@@ -18,29 +19,38 @@ export const listCampaigns: Tool = {
 
 export const createCampaign: Tool = {
   name: "create_campaign",
-  description: "Create a new campaign using the default 7-touch sequence. Starts in DRAFT until activated. HIGH RISK.",
+  description:
+    "Create a new campaign. Sequence styles: 'cold' (default 7-touch: intro, bump, proof, new-angle, quick-question, why-now, breakup over ~5 weeks) or 'nurture' (education-led 7-touch: value intro, expand, problem deep-dive, solution framework, differentiation, objection handler, direct offer over ~3 weeks). Starts in DRAFT until activated. HIGH RISK.",
   risk: "high",
   parameters: schema(
     {
       name: { type: "string" },
       offer: { type: "string", description: "The value proposition / what you're selling" },
       persona: { type: "string", description: "Target persona, e.g. 'VP Ops at mid-market healthcare'" },
+      sequenceStyle: { type: "string", enum: ["cold", "nurture"], description: "Sequence style (default 'cold')" },
       fromEmail: { type: "string", description: "Optional sending address" },
     },
     ["name", "offer", "persona"],
   ),
-  async run(args: { name: string; offer: string; persona: string; fromEmail?: string }) {
+  async run(args: {
+    name: string;
+    offer: string;
+    persona: string;
+    sequenceStyle?: "cold" | "nurture";
+    fromEmail?: string;
+  }) {
     const existing = await CampaignsRepo.getByName(args.name);
     if (existing) return { error: `campaign "${args.name}" already exists`, id: existing._id };
+    const sequence = args.sequenceStyle === "nurture" ? NURTURE_SEQUENCE : DEFAULT_SEQUENCE;
     const c = await CampaignsRepo.create({
       name: args.name,
       offer: args.offer,
       targetPersona: args.persona,
       fromEmail: args.fromEmail,
-      sequence: DEFAULT_SEQUENCE,
+      sequence,
       status: "draft",
     });
-    return { id: c._id, name: c.name, status: c.status };
+    return { id: c._id, name: c.name, status: c.status, sequenceStyle: args.sequenceStyle ?? "cold", steps: sequence.length };
   },
 };
 
@@ -65,7 +75,8 @@ export const setCampaignStatus: Tool = {
 
 export const changeOffer: Tool = {
   name: "change_offer",
-  description: "Update a campaign's offer/value-prop or target persona to test a new angle. HIGH RISK.",
+  description:
+    "Update a campaign's offer/value-prop or target persona to test a new angle. Before calling: diagnose with the value equation (dream outcome × likelihood ÷ time × effort), fix the weakest lever, and change ONE component per iteration. HIGH RISK.",
   risk: "high",
   parameters: schema(
     {

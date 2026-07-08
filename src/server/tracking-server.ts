@@ -1,4 +1,5 @@
 import express, { type Request, type Response } from "express";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { config } from "../config/index.js";
 import { createLogger } from "../lib/logger.js";
@@ -30,6 +31,17 @@ export function createApp() {
   app.use(express.urlencoded({ extended: true }));
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
+
+  // Public rendered-video hosting. Back this directory with a Railway Volume
+  // or object storage in production so generated videos survive redeploys.
+  app.use(
+    "/videos",
+    express.static(path.resolve(config.video.outputDir), {
+      immutable: true,
+      maxAge: "30d",
+      fallthrough: false,
+    }),
+  );
 
   // ── Dashboard ────────────────────────────────────────────────────────────────
   app.use("/dashboard", createDashboardRouter());

@@ -499,15 +499,21 @@ Rendered files land in:
 data/videos/<videoId>.mp4
 ```
 
+When the tracking server is running, rendered videos are served publicly from:
+
+```text
+<TRACKING_BASE_URL>/videos/<videoId>.mp4
+```
+
 Open a local video:
 
 ```bash
 open data/videos/<videoId>.mp4
 ```
 
-Production note: the MP4 is not public until you add hosting/upload. Use local
-rendering for tests, then add static serving or S3/Cloudflare R2 before putting
-video links into real outbound emails.
+Production note: if you host on Railway, mount a Railway Volume at the directory
+used by `VIDEO_OUTPUT_DIR` so generated videos survive redeploys. For higher
+volume, move video files to S3/Cloudflare R2 and store those public URLs.
 
 ## Experiments And Reviews
 

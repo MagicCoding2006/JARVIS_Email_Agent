@@ -12,6 +12,8 @@ export interface CrmRow {
   industry: string;
   website: string;
   status: string;
+  /** Sending mailbox that owns this lead's thread (latest message's from-address). */
+  mailbox: string;
   score: number;
   emailsSent: number;
   opens: number;
@@ -72,7 +74,29 @@ async function rollupEvents(
   return new Map(rollup.map((r) => [r._id, r]));
 }
 
-function toCrmRow(lead: Lead, stats?: EventStats): CrmRow {
+/**
+ * Per-lead sending mailbox: the from-address of the lead's most recent message.
+ * Mailboxes are sticky per enrollment, so this is "who owns the thread".
+ */
+async function rollupMailboxes(
+  c: Awaited<ReturnType<typeof getCollections>>,
+  leadIds?: string[],
+): Promise<Map<string, string>> {
+  const pipeline: Record<string, unknown>[] = [];
+  if (leadIds) pipeline.push({ $match: { leadId: { $in: leadIds } } });
+  pipeline.push({
+    $group: {
+      _id: "$leadId",
+      mailbox: { $top: { sortBy: { createdAt: -1 }, output: "$fromEmail" } },
+    },
+  });
+  const rows = await c.messages
+    .aggregate<{ _id: string; mailbox: string | null }>(pipeline)
+    .toArray();
+  return new Map(rows.map((r) => [r._id, r.mailbox ?? ""]));
+}
+
+function toCrmRow(lead: Lead, stats?: EventStats, mailbox?: string): CrmRow {
   return {
     email: lead.email,
     name: lead.name ?? "",
@@ -81,6 +105,7 @@ function toCrmRow(lead: Lead, stats?: EventStats): CrmRow {
     industry: lead.industry ?? "",
     website: lead.website ?? "",
     status: lead.status,
+    mailbox: mailbox ?? "",
     score: lead.score,
     emailsSent: stats?.sent ?? 0,
     opens: stats?.opens ?? 0,
@@ -101,8 +126,10 @@ function toCrmRow(lead: Lead, stats?: EventStats): CrmRow {
 export async function buildCrmSnapshot(): Promise<CrmRow[]> {
   const c = await getCollections();
   const leads = await c.leads.find({}).sort({ score: -1 }).toArray();
-  const statsMap = await rollupEvents(c);
-  return leads.map((lead: Lead) => toCrmRow(lead, statsMap.get(lead._id)));
+  const [statsMap, mailboxMap] = await Promise.all([rollupEvents(c), rollupMailboxes(c)]);
+  return leads.map((lead: Lead) =>
+    toCrmRow(lead, statsMap.get(lead._id), mailboxMap.get(lead._id)),
+  );
 }
 
 export interface CrmPageQuery {
@@ -150,13 +177,16 @@ export async function buildCrmPage(q: CrmPageQuery = {}): Promise<CrmPageResult>
     .limit(pageSize)
     .toArray();
 
-  const statsMap = await rollupEvents(
-    c,
-    leads.map((l: Lead) => l._id),
-  );
+  const pageLeadIds = leads.map((l: Lead) => l._id);
+  const [statsMap, mailboxMap] = await Promise.all([
+    rollupEvents(c, pageLeadIds),
+    rollupMailboxes(c, pageLeadIds),
+  ]);
 
   return {
-    rows: leads.map((lead: Lead) => toCrmRow(lead, statsMap.get(lead._id))),
+    rows: leads.map((lead: Lead) =>
+      toCrmRow(lead, statsMap.get(lead._id), mailboxMap.get(lead._id)),
+    ),
     total,
     page,
     pageSize,
@@ -174,6 +204,7 @@ export function toCsv(rows: CrmRow[]): string {
     "industry",
     "website",
     "status",
+    "mailbox",
     "score",
     "emailsSent",
     "opens",
@@ -206,6 +237,7 @@ export function printCrmTable(rows: CrmRow[]): void {
     { label: "Email", key: "email" as const, width: 30 },
     { label: "Company", key: "company" as const, width: 22 },
     { label: "Status", key: "status" as const, width: 13 },
+    { label: "Mailbox", key: "mailbox" as const, width: 26 },
     { label: "Score", key: "score" as const, width: 5 },
     { label: "Sent", key: "emailsSent" as const, width: 4 },
     { label: "Open", key: "opens" as const, width: 4 },

@@ -11,6 +11,7 @@ import {
   MessagesRepo,
 } from "../repositories/index.js";
 import { DEFAULT_SEQUENCE } from "../services/sequences/default-sequence.js";
+import { NURTURE_SEQUENCE } from "../services/sequences/nurture-sequence.js";
 import { enrollLead } from "../services/sequencer.service.js";
 import { dispatchDue } from "../workers/dispatcher.js";
 import { processEvents } from "../workers/event-processor.js";
@@ -127,7 +128,7 @@ async function cmdCreateCampaign(p: Parsed) {
   const offer = str(p.flags.offer);
   const persona = str(p.flags.persona);
   if (!name || !offer || !persona) {
-    throw new Error('usage: cli create-campaign --name "X" --offer "..." --persona "..." [--from email] [--sequence-file seq.json] [--active]');
+    throw new Error('usage: cli create-campaign --name "X" --offer "..." --persona "..." [--from email] [--sequence cold|nurture] [--sequence-file seq.json] [--active]');
   }
   const existing = await CampaignsRepo.getByName(name);
   if (existing) {
@@ -135,8 +136,10 @@ async function cmdCreateCampaign(p: Parsed) {
     return;
   }
 
-  // Optional custom sequence (e.g. with bodyTemplate/subjectTemplate slots).
-  let sequence = DEFAULT_SEQUENCE;
+  // Built-in sequence style, or a custom file (e.g. with bodyTemplate slots).
+  const style = str(p.flags.sequence, "cold");
+  if (style !== "cold" && style !== "nurture") throw new Error('--sequence must be "cold" or "nurture"');
+  let sequence = style === "nurture" ? NURTURE_SEQUENCE : DEFAULT_SEQUENCE;
   const seqFile = str(p.flags["sequence-file"]);
   if (seqFile) {
     const raw = readFileSync(seqFile, "utf-8");

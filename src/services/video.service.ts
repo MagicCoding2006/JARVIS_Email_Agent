@@ -269,7 +269,7 @@ export async function produceVideo(
       ctaLabel: config.booking.ctaLabel || `Book a ${config.booking.meetingMinutes}-min demo`,
     });
     const mp4 = await renderWithRemotion({ videoId, spec, audioPath, durationSec });
-    await VideosRepo.setStatus(videoId, "uploaded", `file://${mp4}`);
+    await VideosRepo.setStatus(videoId, "uploaded", trackingUrls.videoFile(path.basename(mp4)));
     log.info(`produced video ${videoId}`);
   } catch (err) {
     await VideosRepo.setStatus(videoId, "failed");

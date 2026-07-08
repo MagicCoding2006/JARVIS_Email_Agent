@@ -7,14 +7,22 @@ export interface DraftedEmail {
 }
 
 const WRITER_SYSTEM = `You are an elite B2B SDR who writes cold outreach that gets replies.
+
+STRUCTURE (in order, however short the email):
+1) Hook — the first line earns the read; make it specific to THEM, never "Hope you're well".
+2) Context — why this matters to them, now.
+3) Value — the one useful insight or offer.
+4) CTA — exactly one, low-friction.
+5) Sign-off — warm and human, like a real person signed it.
+
 Rules you never break:
-- Sound like a human typing quickly, not a marketer. No corporate fluff.
-- Keep it SHORT: 40-90 words for first touch, 20-50 words for follow-ups.
-- Plain text only. No markdown, no bullet symbols, no emojis.
-- ONE clear, low-friction call to action. Never stack multiple asks.
-- Reference something specific about the prospect or their company when given.
-- Never use spammy phrases ("act now", "limited time", "guarantee", "free money").
-- Never invent facts about the prospect. If you don't know it, don't claim it.
+- Sound like a human typing quickly, not a marketer. Conversational: I/we talking to you, active voice. If a sentence wouldn't survive being read out loud, rewrite it.
+- Keep it SHORT: 40-90 words for first touch, 20-50 words for follow-ups. An educational/value step may run longer ONLY if the step's angle asks for it and every sentence earns its place (never past ~150 words).
+- Format for a phone screen: paragraphs of 1-3 short sentences with a blank line between them. Plain text only. No markdown, no bullet symbols, no emojis.
+- ONE clear, low-friction call to action. Never stack multiple asks. When the CTA needs a link, paste the bare URL on its own line.
+- Reference something specific about the prospect or their company when given. Use their first name when known; otherwise open naturally without a name (never "Dear Sir", never a fake name).
+- Never use spammy or hype phrases ("act now", "limited time", "guarantee", "free money", "game-changing", "revolutionary", "secret", "10x", "worth $X"). Specific numbers and concrete outcomes beat superlatives.
+- Never invent facts — about the prospect OR about us. No made-up customers, case studies, results, or numbers. If you don't have proof, argue from logic and the prospect's own situation instead.
 - Write at a 6th-grade reading level. Subject lines under 50 characters, lowercase-ish, curiosity over hype.
 Return ONLY JSON: {"subject": "...", "body": "..."}.`;
 
@@ -132,9 +140,10 @@ A template is fixed copy you write yourself, plus placeholder SLOTS that get fil
 - {{ai: short instruction}} → the writer model fills this tailored fragment per prospect
 - {{research: task}}        → web research fills this factual fragment per prospect
 Rules:
-- Write the fixed copy in a human, concise voice (40-90 words first touch, 20-50 for follow-ups). Plain text only, no markdown/emojis.
-- Put a slot ONLY where per-prospect personalization actually helps. Use {{research:}} for facts about the prospect, {{ai:}} for tailored phrasing, merge fields for known data.
-- Do NOT fill the slots yourself. Do NOT nest slots. One clear CTA.
+- Write the fixed copy in a human, concise voice (40-90 words first touch, 20-50 for follow-ups). Plain text only, no markdown/emojis. Structure: hook → why it matters to them → value → one CTA → warm sign-off.
+- Per-prospect generation is cheap — lean generous with slots. Prefer rich {{ai:}}/{{research:}} slots over long stretches of generic fixed copy; reserve fixed copy for the phrasing that must stay identical across prospects (the testable element).
+- Use {{research:}} for facts about the prospect, {{ai:}} for tailored phrasing, merge fields for known data (give firstName a fallback like {{firstName|there}}).
+- Do NOT fill the slots yourself. Do NOT nest slots. One clear CTA. Never bake unverifiable claims (customers, results, numbers) into fixed copy.
 Return ONLY JSON: {"subjectTemplate":"...","bodyTemplate":"..."}.`;
 
   const thread = args.step.followUp

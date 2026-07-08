@@ -9,6 +9,7 @@ export const trackingUrls = {
   click: (linkId: string) => `${BASE}/c/${linkId}`,
   unsubscribe: (unsubToken: string) => `${BASE}/u/${unsubToken}`,
   video: (videoId: string) => `${BASE}/v/${videoId}`,
+  videoFile: (fileName: string) => `${BASE}/videos/${encodeURIComponent(fileName)}`,
 };
 
 const URL_RE = /https?:\/\/[^\s<>")]+/g;

@@ -28,8 +28,9 @@ export const DEFAULT_SEQUENCE: SequenceStep[] = [
     step: 3,
     purpose: "proof",
     businessDayOffset: 7,
-    angle: "Share a concrete proof point or mini case study (result, number, or peer company) relevant to their persona.",
-    instructions: "Lead with the result. One CTA to see how it applies to them.",
+    angle:
+      "Make the strongest concrete case the OFFER itself supports: the mechanism of how it gets results, a specific before/after scenario for their persona, or a real number from the offer. NO invented customers or case studies — if we have no proof, argue from logic.",
+    instructions: "Lead with the strongest claim you can honestly make. One CTA to see how it applies to them.",
     followUp: true,
   },
   {
@@ -50,9 +51,10 @@ export const DEFAULT_SEQUENCE: SequenceStep[] = [
   },
   {
     step: 6,
-    purpose: "social-proof",
+    purpose: "why-now",
     businessDayOffset: 25,
-    angle: "Name-drop a recognizable peer/competitor outcome or a relevant trend creating urgency now.",
+    angle:
+      "Give a genuine reason this matters NOW: an industry trend, seasonality, or the compounding cost of waiting — grounded in their world. Never invent peer companies, customers, or outcomes.",
     instructions: "Create a reason to act this quarter, honestly.",
     followUp: true,
   },

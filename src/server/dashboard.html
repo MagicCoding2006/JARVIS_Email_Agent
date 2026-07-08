@@ -270,6 +270,7 @@
             <th class="text-left px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Email</th>
             <th class="text-left px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Company</th>
             <th class="text-left px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Status</th>
+            <th class="text-left px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Mailbox</th>
             <th class="text-right px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Score</th>
             <th class="text-right px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Sent</th>
             <th class="text-right px-3 py-2 text-gray-400 font-semibold border-b border-gray-800">Open</th>
@@ -281,7 +282,7 @@
         </thead>
         <tbody id="crm-tbody">
           <tr>
-            <td colspan="10" class="text-center py-12 text-gray-600">Loading CRM data…</td>
+            <td colspan="11" class="text-center py-12 text-gray-600">Loading CRM data…</td>
           </tr>
         </tbody>
       </table>
@@ -376,7 +377,7 @@ function renderCrm(rows, highlightNew) {
   const tbody = document.getElementById('crm-tbody');
   if (!rows.length) {
     const msg = crmSearch ? 'No leads match your search.' : 'No leads yet — use Find Leads to get started.';
-    tbody.innerHTML = `<tr><td colspan="10" class="text-center py-12 text-gray-600">${msg}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="text-center py-12 text-gray-600">${msg}</td></tr>`;
     prevEmails = new Set();
     return;
   }
@@ -389,6 +390,7 @@ function renderCrm(rows, highlightNew) {
       <td class="px-3 py-2 text-blue-300 mono">${r.email}</td>
       <td class="px-3 py-2 text-gray-300 max-w-[140px] truncate" title="${r.company}">${r.company || '—'}</td>
       <td class="px-3 py-2">${statusPill(r.status)}</td>
+      <td class="px-3 py-2 text-gray-500 mono max-w-[160px] truncate" title="${r.mailbox || ''}">${r.mailbox || '—'}</td>
       <td class="px-3 py-2 text-right font-bold ${r.score >= 70 ? 'text-red-400' : r.score > 0 ? 'text-yellow-400' : 'text-gray-600'}">${r.score}</td>
       <td class="px-3 py-2 text-right text-gray-400">${r.emailsSent || '—'}</td>
       <td class="px-3 py-2 text-right ${r.opens > 0 ? 'text-blue-400' : 'text-gray-600'}">${r.opens || '—'}</td>
