@@ -52,6 +52,12 @@ export const config = {
     user: opt("SMTP_USER"),
     pass: opt("SMTP_PASS"),
   },
+  emailTransport: opt("EMAIL_TRANSPORT", "smtp").toLowerCase(),
+  microsoft: {
+    tenantId: opt("MICROSOFT_TENANT_ID"),
+    clientId: opt("MICROSOFT_CLIENT_ID"),
+    clientSecret: opt("MICROSOFT_CLIENT_SECRET"),
+  },
   mail: {
     fromName: opt("FROM_NAME", "Sales"),
     fromEmail: opt("FROM_EMAIL", "sales@example.com"),

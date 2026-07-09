@@ -1,5 +1,6 @@
 import { config } from "../../config/index.js";
 import { createLogger } from "../../lib/logger.js";
+import { MicrosoftGraphSender } from "./microsoft-graph.sender.js";
 import { SmtpSender } from "./smtp.sender.js";
 import type { EmailSender, SendRequest, SendResult } from "./sender.interface.js";
 
@@ -25,7 +26,11 @@ let cached: EmailSender | null = null;
 /** Returns the active sender, honoring DRY_RUN. */
 export function getSender(): EmailSender {
   if (cached) return cached;
-  cached = config.sending.dryRun ? new DryRunSender() : new SmtpSender();
+  cached = config.sending.dryRun
+    ? new DryRunSender()
+    : config.emailTransport === "graph"
+      ? new MicrosoftGraphSender(config.mail.fromEmail)
+      : new SmtpSender();
   return cached;
 }
 

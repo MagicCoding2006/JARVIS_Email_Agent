@@ -15,6 +15,7 @@ import { calendlyEnabled } from "../services/calendly.service.js";
 import { imapEnabled, pollReplies } from "../services/imap-poller.service.js";
 
 const log = createLogger("scheduler");
+let dispatchRunning = false;
 
 /** Wire up the recurring jobs. Returns the scheduled tasks for shutdown. */
 export function startScheduler(): cron.ScheduledTask[] {
@@ -22,8 +23,19 @@ export function startScheduler(): cron.ScheduledTask[] {
 
   // Send due messages frequently; the dispatcher self-limits to the window + caps.
   tasks.push(
-    cron.schedule("*/5 * * * *", () => {
-      dispatchDue().catch((err) => log.error("dispatch job failed", err));
+    cron.schedule("*/5 * * * *", async () => {
+      if (dispatchRunning) {
+        log.warn("dispatch job still running — skipping overlapping run");
+        return;
+      }
+      dispatchRunning = true;
+      try {
+        await dispatchDue();
+      } catch (err) {
+        log.error("dispatch job failed", err);
+      } finally {
+        dispatchRunning = false;
+      }
     }),
   );
 

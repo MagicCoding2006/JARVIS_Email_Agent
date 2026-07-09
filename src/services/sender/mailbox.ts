@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { config } from "../../config/index.js";
 import { createLogger } from "../../lib/logger.js";
 import { MessagesRepo } from "../../repositories/index.js";
+import { MicrosoftGraphSender } from "./microsoft-graph.sender.js";
 import { SmtpSender } from "./smtp.sender.js";
 import type { EmailSender } from "./sender.interface.js";
 
@@ -140,11 +141,14 @@ function syntheticMailbox(email: string): Mailbox {
   };
 }
 
-/** Cached SMTP transport bound to a mailbox's own credentials. */
+/** Cached transport bound to a mailbox's sending identity. */
 export function senderForMailbox(mb: Mailbox): EmailSender {
   let s = senders.get(mb.email);
   if (!s) {
-    s = new SmtpSender(mb.smtp, `smtp:${mb.email}`);
+    s =
+      config.emailTransport === "graph"
+        ? new MicrosoftGraphSender(mb.email)
+        : new SmtpSender(mb.smtp, `smtp:${mb.email}`);
     senders.set(mb.email, s);
   }
   return s;
