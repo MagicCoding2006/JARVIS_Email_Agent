@@ -120,14 +120,13 @@ Full layer-by-layer status and the data model are in [ARCHITECTURE.md](./ARCHITE
    and turns marked no-shows into rebooking-draft approvals. With `GITHUB_TOKEN`
    + `WEBSITE_REPO` the agent can also read the landing page and propose copy
    changes as pull requests (`site.tools.ts` — merge is the human gate).
-6. Daily brain (08:30): if GLM is configured, `autonomous-cycle` runs the agent
-   (reviews + acts via tools; high-risk → approvals). It reads its persistent
-   playbook (`playbook_notes`), keeps the funnel fed (`get_pipeline_inventory`,
-   `auto_enroll`, free `discover_leads` — all bounded by code-enforced daily
-   budgets), and can tune send pace within hard ceilings. Otherwise the
-   deterministic `daily-cycle` runs. `human-digest` (Mon 08:00) tells the
-   operator what needs a human; `weekly-review` prunes losers + breakdowns;
-   `monthly-review` summarizes outcomes. Drive everything live via Telegram.
+6. Daily update (08:30): controlled by `AGENT_DAILY_MODE`. Default `metrics`
+   sends only the core campaign numbers with no LLM/tool loop. `review` runs
+   the one-shot strategist `daily-cycle`; `autonomous` runs the full tool-using
+   agent (`autonomous-cycle`, highest token usage). `human-digest` (Mon 08:00)
+   tells the operator what needs a human; `weekly-review` prunes losers +
+   breakdowns; `monthly-review` summarizes outcomes. Drive everything live via
+   Telegram.
 
 ## Conventions
 

@@ -543,6 +543,14 @@ npm run cli -- weekly-review
 npm run cli -- monthly-review
 ```
 
+The scheduled 08:30 daily update is controlled by `AGENT_DAILY_MODE`:
+
+```text
+metrics    # default: Telegram campaign numbers only, no LLM/tool loop
+review     # one strategist review + experiment generation
+autonomous # full tool-using agent cycle, highest token usage
+```
+
 Hypotheses:
 
 ```bash

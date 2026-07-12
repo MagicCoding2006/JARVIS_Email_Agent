@@ -4,7 +4,7 @@ import { createLogger } from "../lib/logger.js";
 import { strategist } from "../llm/roles.js";
 import { dispatchDue } from "./dispatcher.js";
 import { processEvents } from "./event-processor.js";
-import { runDailyCycle } from "./daily-cycle.js";
+import { runDailyCycle, runMetricsDigest } from "./daily-cycle.js";
 import { runAutonomousCycle } from "./autonomous-cycle.js";
 import { runWeeklyReview } from "./weekly-review.js";
 import { runMonthlyReview } from "./monthly-review.js";
@@ -75,12 +75,16 @@ export function startScheduler(): cron.ScheduledTask[] {
     );
   }
 
-  // Once-daily brain (cost-controlled). If the strategist (GLM) is configured we
-  // run the agentic cycle where it reviews + acts via tools; otherwise we fall
-  // back to the deterministic daily cycle (metrics + variant gen + digest).
+  // Once-daily update. Default to metrics-only because the full agentic cycle
+  // resends a large prompt/tool schema context on each tool-using turn.
   tasks.push(
     cron.schedule("30 8 * * *", () => {
-      const job = strategist.configured ? runAutonomousCycle() : runDailyCycle();
+      const job =
+        config.agent.dailyMode === "autonomous" && strategist.configured
+          ? runAutonomousCycle()
+          : config.agent.dailyMode === "review" && strategist.configured
+            ? runDailyCycle()
+            : runMetricsDigest();
       Promise.resolve(job).catch((err) => log.error("daily brain failed", err));
     }),
   );

@@ -20,6 +20,22 @@ Be concise, specific, and quantitative. Propose only experiments that are cheap 
 Return ONLY JSON:
 {"observations": ["..."], "hypotheses": [{"idea":"...","reason":"..."}], "recommendations": ["..."], "experiments": ["..."]}`;
 
+/** Cheapest daily update: just send the core campaign numbers, no LLM. */
+export async function runMetricsDigest(): Promise<DailyMetrics> {
+  const metrics = await buildDailyMetrics(24);
+  const reportText = renderMetricsText(metrics);
+  log.info("daily metrics digest\n" + reportText);
+
+  await notify({
+    kind: "daily_digest",
+    level: "important",
+    title: "Daily SDR numbers",
+    body: reportText,
+  });
+
+  return metrics;
+}
+
 /**
  * The daily optimization cycle (cost-controlled: the expensive strategist model
  * is called at most once per day). Generates a report, asks the strategist for

@@ -157,6 +157,9 @@ export const config = {
     bounceWindowHours: num("BOUNCE_WINDOW_HOURS", 24),
   },
   agent: {
+    // "metrics" = cheapest daily Telegram numbers only; "review" = one
+    // strategist review; "autonomous" = full tool-using agent loop.
+    dailyMode: (opt("AGENT_DAILY_MODE", "metrics") as "metrics" | "review" | "autonomous"),
     // "semi" = low-risk auto, high-risk needs approval; "propose" = approve all;
     // "full" = act within hard caps. See src/agent/autonomy.ts.
     autonomy: (opt("AGENT_AUTONOMY", "semi") as "semi" | "propose" | "full"),
