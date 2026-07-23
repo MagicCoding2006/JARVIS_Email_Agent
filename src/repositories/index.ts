@@ -295,6 +295,18 @@ export const EnrollmentsRepo = {
     return c.enrollments.countDocuments({ enrolledAt: { $gte: since } });
   },
 
+  /** Count active sticky assignments per mailbox for new-enrollment load balancing. */
+  async countActiveAssignedByMailbox(): Promise<Map<string, number>> {
+    const c = await getCollections();
+    const rows = await c.enrollments
+      .aggregate<{ _id: string; count: number }>([
+        { $match: { status: "active", assignedMailbox: { $exists: true, $ne: "" } } },
+        { $group: { _id: { $toLower: "$assignedMailbox" }, count: { $sum: 1 } } },
+      ])
+      .toArray();
+    return new Map(rows.map((r) => [r._id, r.count]));
+  },
+
   /** Stop all active enrollments for a lead (e.g. on reply or unsubscribe). */
   async stopAllForLead(leadId: string, status: EnrollmentStatus, reason: string): Promise<number> {
     const c = await getCollections();

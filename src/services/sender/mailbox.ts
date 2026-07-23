@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { config } from "../../config/index.js";
 import { createLogger } from "../../lib/logger.js";
-import { MessagesRepo } from "../../repositories/index.js";
+import { EnrollmentsRepo, MessagesRepo } from "../../repositories/index.js";
 import { MicrosoftGraphSender } from "./microsoft-graph.sender.js";
 import { SmtpSender } from "./smtp.sender.js";
 import type { EmailSender } from "./sender.interface.js";
@@ -195,19 +195,48 @@ export async function allCapacities(): Promise<Map<string, MailboxCapacity>> {
   return new Map(entries.map((e) => [e.email, e]));
 }
 
+/** Pick the mailbox with the lowest active assigned-enrollment load,
+ * normalized by that mailbox's effective daily cap. This accounts for bulk
+ * scheduling before any messages have actually been sent, when sent/remaining
+ * capacity would otherwise be tied for every mailbox. */
+export function selectMailboxByAssignedLoad(
+  boxes: Mailbox[],
+  capacities: Map<string, MailboxCapacity>,
+  activeAssigned: Map<string, number>,
+): Mailbox {
+  return [...boxes].sort((a, b) => {
+    const ca = capacities.get(a.email);
+    const cb = capacities.get(b.email);
+    const loadA = activeAssigned.get(a.email) ?? 0;
+    const loadB = activeAssigned.get(b.email) ?? 0;
+    const capA = Math.max(1, ca?.cap ?? a.dailyCap);
+    const capB = Math.max(1, cb?.cap ?? b.dailyCap);
+    const loadRatio = loadA / capA - loadB / capB;
+    if (loadRatio !== 0) return loadRatio;
+
+    const remainingA = ca?.remaining ?? capA;
+    const remainingB = cb?.remaining ?? capB;
+    if (remainingB !== remainingA) return remainingB - remainingA;
+
+    const sentRatio = (ca?.sentToday ?? 0) / capA - (cb?.sentToday ?? 0) / capB;
+    if (sentRatio !== 0) return sentRatio;
+
+    return a.email.localeCompare(b.email);
+  })[0];
+}
+
 /**
- * Choose the sticky mailbox for a new prospect. Picks the mailbox with the most
- * remaining capacity today (tie-broken by lowest fill ratio) so load spreads
- * evenly. Never returns null — send-time cap checks handle throttling.
+ * Choose the sticky mailbox for a new prospect. Picks the mailbox with the
+ * lowest active assigned-enrollment load normalized by effective capacity, so
+ * bulk enrollment spreads assignments even before scheduled messages send.
+ * Never returns null — send-time cap checks handle throttling.
  */
 export async function assignMailbox(): Promise<Mailbox> {
   const boxes = getMailboxes();
   if (boxes.length === 1) return boxes[0];
-  const caps = await allCapacities();
-  return [...boxes].sort((a, b) => {
-    const ca = caps.get(a.email)!;
-    const cb = caps.get(b.email)!;
-    if (cb.remaining !== ca.remaining) return cb.remaining - ca.remaining;
-    return ca.sentToday / Math.max(1, ca.cap) - cb.sentToday / Math.max(1, cb.cap);
-  })[0];
+  const [caps, activeAssigned] = await Promise.all([
+    allCapacities(),
+    EnrollmentsRepo.countActiveAssignedByMailbox(),
+  ]);
+  return selectMailboxByAssignedLoad(boxes, caps, activeAssigned);
 }
