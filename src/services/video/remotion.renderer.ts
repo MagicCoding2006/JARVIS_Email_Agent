@@ -3,6 +3,7 @@ import { writeFile, mkdir, copyFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "../../config/index.js";
+import { videoOutputDir } from "./paths.js";
 import { createLogger } from "../../lib/logger.js";
 import type { SceneSpec } from "./scene-spec.js";
 
@@ -42,7 +43,7 @@ export async function renderWithRemotion(args: {
   await mkdir(path.dirname(propsPath), { recursive: true });
   await writeFile(propsPath, JSON.stringify(props));
 
-  const outDir = path.resolve(ROOT, config.video.outputDir);
+  const outDir = videoOutputDir();
   await mkdir(outDir, { recursive: true });
   const outPath = path.join(outDir, `${args.videoId}.mp4`);
 

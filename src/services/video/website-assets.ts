@@ -3,6 +3,7 @@ import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "../../config/index.js";
+import { videoOutputDir } from "./paths.js";
 import { createLogger } from "../../lib/logger.js";
 import type { Lead } from "../../models/types.js";
 
@@ -125,7 +126,7 @@ async function captureWebsiteScreenshot(url: string, videoId: string): Promise<s
     return undefined;
   }
 
-  const outDir = path.resolve(ROOT, config.video.outputDir, "screenshots");
+  const outDir = videoOutputDir("screenshots");
   await mkdir(outDir, { recursive: true });
   const outPath = path.join(outDir, `${videoId}.png`);
 

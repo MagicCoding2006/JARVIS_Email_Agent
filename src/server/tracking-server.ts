@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from "express";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { config } from "../config/index.js";
 import { createLogger } from "../lib/logger.js";
@@ -9,6 +8,7 @@ import { handleInboundReply } from "../services/replies.service.js";
 import { createGmailPixel } from "../services/compose.service.js";
 import { handleBookingWebhook, type BookingProvider } from "../services/booking.service.js";
 import { createDashboardRouter } from "./dashboard.js";
+import { videoOutputDir } from "../services/video/paths.js";
 
 const log = createLogger("tracking-server");
 
@@ -36,7 +36,7 @@ export function createApp() {
   // or object storage in production so generated videos survive redeploys.
   app.use(
     "/videos",
-    express.static(path.resolve(config.video.outputDir), {
+    express.static(videoOutputDir(), {
       immutable: true,
       maxAge: "30d",
       fallthrough: false,
@@ -142,8 +142,16 @@ export function createApp() {
           metadata: { videoId: asset._id, percent },
         });
         if (asset.videoUrl) return res.redirect(302, asset.videoUrl);
+        if (asset.status === "failed") {
+          return res
+            .status(502)
+            .send(
+              `<html><body style="font-family:sans-serif;text-align:center;padding:60px">` +
+                `<h2>Video render failed</h2><p>Please regenerate this video, then reopen this link.</p></body></html>`,
+            );
+        }
         return res
-          .status(200)
+          .status(202)
           .send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px"><h2>Your video is being prepared…</h2></body></html>`);
       }
     } catch (err) {

@@ -9,6 +9,7 @@ import { synthesizeVoiceover } from "./video/gemini-tts.js";
 import { generateSceneSpec } from "./video/scene-spec.js";
 import { renderWithRemotion } from "./video/remotion.renderer.js";
 import { buildWebsiteVisuals } from "./video/website-assets.js";
+import { videoOutputDir } from "./video/paths.js";
 import type { Lead, VideoAsset, VideoPurpose } from "../models/types.js";
 
 const log = createLogger("video");
@@ -252,7 +253,7 @@ export async function produceVideo(
   try {
     const lead = await LeadsRepo.getById(asset.leadId);
     const visuals = lead ? await buildWebsiteVisuals(lead, videoId) : {};
-    const audioPath = path.resolve(config.video.outputDir, `${videoId}.wav`);
+    const audioPath = videoOutputDir(`${videoId}.wav`);
     const { durationSec } = await synthesizeVoiceover({ text: asset.script, outPath: audioPath });
     const spec = await generateSceneSpec({
       script: asset.script,
