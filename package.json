@@ -21,6 +21,8 @@
     "verify": "npm run typecheck && npm test",
     "railway:check": "npm run build && node scripts/railway-smoke.mjs",
     "check:links": "node scripts/link-smoke.mjs",
+    "preview:email": "npm run build && node scripts/preview-email.mjs",
+    "preview:video": "cd remotion && npx remotion render src/index.ts LoomVideo out/preview-video.mp4 --frames=0-539",
     "verify:video": "cd remotion && npx tsc -p tsconfig.json --noEmit && npx remotion still src/index.ts LoomVideo out/test-frame.png --frame=150"
   },
   "dependencies": {
