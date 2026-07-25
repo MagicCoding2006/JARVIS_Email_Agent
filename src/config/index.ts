@@ -94,7 +94,9 @@ export const config = {
   },
   tracking: {
     baseURL: opt("TRACKING_BASE_URL", "http://localhost:8787").replace(/\/$/, ""),
-    port: num("TRACKING_PORT", 8787),
+    // Railway and similar hosts inject PORT. Prefer it so health checks hit the
+    // listener they expect, while TRACKING_PORT still works for local dev.
+    port: num("PORT", num("TRACKING_PORT", 8787)),
     replyWebhookSecret: opt("REPLY_WEBHOOK_SECRET", "change-me"),
   },
   imap: {

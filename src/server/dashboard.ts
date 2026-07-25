@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { spawn } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { buildCrmSnapshot, buildCrmPage, toCsv } from "../services/crm.service.js";
 import { buildDashboardAnalytics } from "../services/analytics.service.js";
 import { allCapacities, getMailboxes } from "../services/sender/mailbox.js";
@@ -17,9 +17,20 @@ let dashboardHtml: string;
 
 function getHtml(): string {
   if (!dashboardHtml) {
-    dashboardHtml = readFileSync(join(__dirname, "dashboard.html"), "utf-8");
+    const compiledPath = join(__dirname, "dashboard.html");
+    const sourcePath = join(process.cwd(), "src", "server", "dashboard.html");
+    dashboardHtml = readFileSync(existsSync(compiledPath) ? compiledPath : sourcePath, "utf-8");
   }
   return dashboardHtml;
+}
+
+function cliCommand(): { cmd: string; args: string[] } {
+  const compiledCli = join(process.cwd(), "dist", "cli", "index.js");
+  if (existsSync(compiledCli)) return { cmd: process.execPath, args: [compiledCli] };
+
+  const sourceCli = join(process.cwd(), "src", "cli", "index.ts");
+  const tsxCli = join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
+  return { cmd: process.execPath, args: [tsxCli, sourceCli] };
 }
 
 export function createDashboardRouter(): Router {
@@ -161,11 +172,9 @@ export function createDashboardRouter(): Router {
       res.write(`data: ${JSON.stringify({ type, ...payload })}\n\n`);
     };
 
-    const cliPath = join(process.cwd(), "src", "cli", "index.ts");
-    const tsxPath = join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
-
+    const cli = cliCommand();
     const args = [
-      tsxPath, cliPath,
+      ...cli.args,
       "discover-contractors",
       "--trade", String(trade),
       "--limit", String(Math.min(Number(limit) || 5, 25)),
@@ -174,7 +183,7 @@ export function createDashboardRouter(): Router {
     if (location) args.push("--location", String(location));
     if (allowUnverified) args.push("--allow-unverified");
 
-    const child = spawn(process.execPath, args, {
+    const child = spawn(cli.cmd, args, {
       env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: "0", NO_COLOR: "1", FORCE_COLOR: "0" },
       cwd: process.cwd(),
     });
