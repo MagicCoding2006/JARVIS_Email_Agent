@@ -11,7 +11,8 @@ aptPkgs = [
   "libnss3",
   "libdbus-1-3",
   "libatk1.0-0",
-  "libasound2",
+  # Ubuntu 24.04 (noble, Railway's current base) renamed libasound2 -> libasound2t64.
+  "libasound2t64",
   "libxrandr2",
   "libxkbcommon-dev",
   "libxfixes3",
