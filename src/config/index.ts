@@ -215,12 +215,19 @@ export const config = {
     apiKey: opt("GEMINI_API_KEY"),
     ttsModel: opt("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts"),
     ttsVoice: opt("GEMINI_TTS_VOICE", "Achird"),
+    // On a 429/overload, wait the server-suggested delay and retry this many
+    // times. Clears the free tier's 3 req/min limit; the 15 req/day limit
+    // can't be waited out (resets at midnight PT) → enable billing for volume.
+    ttsMaxRetries: num("GEMINI_TTS_MAX_RETRIES", 4),
   },
   video: {
     outputDir: opt("VIDEO_OUTPUT_DIR", "data/videos"),
     enableRemotion: bool("VIDEO_ENABLE_REMOTION", false),
     captureWebsite: bool("VIDEO_CAPTURE_WEBSITE", true),
     chromePath: opt("VIDEO_CHROME_PATH"),
+    // Remotion render concurrency. Caps parallel Chrome tabs = caps peak RAM.
+    // Keep low (1–2) on memory-limited hosts like Railway; 0 = let Remotion decide.
+    renderConcurrency: num("VIDEO_RENDER_CONCURRENCY", 0),
   },
 } as const;
 

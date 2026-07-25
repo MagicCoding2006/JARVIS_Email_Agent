@@ -272,7 +272,8 @@ export async function produceVideo(
     await VideosRepo.setStatus(videoId, "uploaded", trackingUrls.videoFile(path.basename(mp4)));
     log.info(`produced video ${videoId}`);
   } catch (err) {
-    await VideosRepo.setStatus(videoId, "failed");
+    const reason = err instanceof Error ? err.message : String(err);
+    await VideosRepo.setStatus(videoId, "failed", undefined, reason.slice(0, 500));
     log.error(`produceVideo failed for ${videoId} (audio may still exist)`, err);
   }
   return VideosRepo.getById(videoId);

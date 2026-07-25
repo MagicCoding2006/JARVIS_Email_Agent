@@ -46,11 +46,18 @@ export async function renderWithRemotion(args: {
   await mkdir(outDir, { recursive: true });
   const outPath = path.join(outDir, `${args.videoId}.mp4`);
 
-  await run(
-    NPX,
-    ["remotion", "render", ENTRY_POINT, "LoomVideo", outPath, `--props=${propsPath}`, `--frames=0-${durationInFrames - 1}`],
-    REMOTION_DIR,
-  );
+  const renderArgs = [
+    "remotion", "render", ENTRY_POINT, "LoomVideo", outPath,
+    `--props=${propsPath}`,
+    `--frames=0-${durationInFrames - 1}`,
+  ];
+  // Cap parallel Chrome tabs → cap peak RAM on memory-limited hosts (Railway).
+  if (config.video.renderConcurrency > 0) renderArgs.push(`--concurrency=${config.video.renderConcurrency}`);
+  // Use a system Chrome if one is pinned; otherwise Remotion uses the browser
+  // baked in at build time (`remotion browser ensure`).
+  if (config.video.chromePath) renderArgs.push(`--browser-executable=${config.video.chromePath}`);
+
+  await run(NPX, renderArgs, REMOTION_DIR);
   log.info(`rendered ${outPath}`);
   return outPath;
 }

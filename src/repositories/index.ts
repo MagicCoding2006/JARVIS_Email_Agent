@@ -664,11 +664,20 @@ export const VideosRepo = {
     return c.videos.findOne({ _id: id });
   },
 
-  async setStatus(id: string, status: VideoStatus, videoUrl?: string): Promise<void> {
+  async setStatus(id: string, status: VideoStatus, videoUrl?: string, error?: string): Promise<void> {
     const c = await getCollections();
     await c.videos.updateOne(
       { _id: id },
-      { $set: { status, ...(videoUrl ? { videoUrl } : {}), updatedAt: now() } },
+      {
+        $set: {
+          status,
+          ...(videoUrl ? { videoUrl } : {}),
+          ...(error !== undefined ? { error } : {}),
+          updatedAt: now(),
+        },
+        // Clear a stale error once the video succeeds.
+        ...(status === "uploaded" || status === "rendered" ? { $unset: { error: "" } } : {}),
+      },
     );
   },
 

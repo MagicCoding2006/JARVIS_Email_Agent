@@ -269,6 +269,8 @@ export interface VideoAsset {
   watchUrl: string;
   /** Max observed watch percentage (0–100). */
   watchPercent: number;
+  /** Last render error (set when status="failed") — the reason a link never got a video. */
+  error?: string;
   createdAt: Date;
   updatedAt: Date;
 }

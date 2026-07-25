@@ -1,6 +1,8 @@
+# Build phases (install remotion deps, system libs, browser) live in nixpacks.toml
+# so they aren't overridden here. Don't add buildCommand back — it would replace
+# the nixpacks.toml [phases.build] and skip `remotion browser ensure`.
 [build]
 builder = "nixpacks"
-buildCommand = "npm run build"
 
 [deploy]
 startCommand = "npm start"

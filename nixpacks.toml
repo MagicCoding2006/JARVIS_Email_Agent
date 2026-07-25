@@ -1,0 +1,42 @@
+# Nixpacks build for Railway. The default Node build can't render video, so this:
+#   1. installs the system libraries Remotion's headless Chrome needs (aptPkgs),
+#   2. installs the nested remotion/ project's deps (own package + lockfile),
+#   3. bakes the Chrome Headless Shell into the image (`remotion browser ensure`)
+#      so the first render doesn't have to download it at runtime.
+# Package list is Remotion's official Linux dependency set:
+# https://www.remotion.dev/docs/miscellaneous/linux-dependencies
+
+[phases.setup]
+aptPkgs = [
+  "libnss3",
+  "libdbus-1-3",
+  "libatk1.0-0",
+  "libasound2",
+  "libxrandr2",
+  "libxkbcommon-dev",
+  "libxfixes3",
+  "libxcomposite1",
+  "libxdamage1",
+  "libgbm-dev",
+  "libcups2",
+  "libcairo2",
+  "libpango-1.0-0",
+  "libatk-bridge2.0-0",
+  "fonts-liberation",
+  "fontconfig",
+]
+
+# Overrides the default install phase — must install BOTH package trees.
+[phases.install]
+cmds = [
+  "npm ci",
+  "npm --prefix remotion ci",
+]
+
+# Overrides the default build phase — compile TS, then pre-download the browser
+# so it's part of the image (runtime disk on Railway is ephemeral per deploy).
+[phases.build]
+cmds = [
+  "npm run build",
+  "cd remotion && npx remotion browser ensure",
+]
