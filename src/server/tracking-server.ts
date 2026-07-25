@@ -8,6 +8,7 @@ import { EventsRepo, LeadsRepo, MessagesRepo, EnrollmentsRepo, VideosRepo } from
 import { handleInboundReply } from "../services/replies.service.js";
 import { createGmailPixel } from "../services/compose.service.js";
 import { handleBookingWebhook, type BookingProvider } from "../services/booking.service.js";
+import { trackingUrls } from "../services/tracking.service.js";
 import { createDashboardRouter } from "./dashboard.js";
 
 const log = createLogger("tracking-server");
@@ -141,7 +142,8 @@ export function createApp() {
           type: "video_watched",
           metadata: { videoId: asset._id, percent },
         });
-        if (asset.videoUrl) return res.redirect(302, asset.videoUrl);
+        const videoUrl = publicVideoUrl(asset.videoUrl);
+        if (videoUrl) return res.redirect(302, videoUrl);
         return res
           .status(200)
           .send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px"><h2>Your video is being prepared…</h2></body></html>`);
@@ -204,6 +206,17 @@ export function createApp() {
   });
 
   return app;
+}
+
+function publicVideoUrl(videoUrl?: string): string | undefined {
+  if (!videoUrl) return undefined;
+  if (!videoUrl.startsWith("file://")) return videoUrl;
+
+  try {
+    return trackingUrls.videoFile(path.basename(new URL(videoUrl).pathname));
+  } catch {
+    return trackingUrls.videoFile(path.basename(videoUrl.replace(/^file:\/\//, "")));
+  }
 }
 
 export async function startTrackingServer(): Promise<void> {

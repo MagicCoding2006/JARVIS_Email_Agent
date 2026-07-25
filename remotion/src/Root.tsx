@@ -2,23 +2,61 @@ import React from "react";
 import { Composition } from "remotion";
 import { LoomVideo, type LoomProps } from "./LoomVideo";
 
-const DEFAULT_PROPS: LoomProps = {
+const DEFAULT_PROPS = {
   fps: 30,
-  durationInFrames: 480,
+  durationInFrames: 540,
   audioFile: "",
   spec: {
-    title: "Quick intro",
-    accent: "#4f46e5",
+    title: "Acme Roofing missed-call demo",
+    accent: "#22c55e",
     prospectName: "Mike",
     companyName: "Acme Roofing",
+    websiteUrl: "https://acmeroofing.example",
     ctaUrl: "https://calendly.com/you/intro",
-    ctaLabel: "Book a 15-min demo",
+    ctaLabel: "Book a 15-min walkthrough",
     scenes: [
-      { durationSec: 8, headline: "Acme Roofing, you're losing jobs.", highlight: "losing jobs", subtext: "Missing just 3 calls a week", dataPoints: [{ label: "Lost revenue", value: "$30,000" }] },
-      { durationSec: 8, kicker: "The ask", headline: "Turn missed calls into jobs.", highlight: "jobs", subtext: "See it live, 15 minutes." },
+      {
+        durationSec: 4,
+        headline: "Acme Roofing, missed calls cost jobs",
+        highlight: "cost jobs",
+        subtext: "A personalized look at the calls that slip past the team.",
+        visual: "website",
+      },
+      {
+        durationSec: 4,
+        kicker: "The leak",
+        headline: "Voicemail loses the buyer",
+        highlight: "Voicemail",
+        subtext: "The first contractor to answer usually gets the inspection.",
+        visual: "missed_call",
+      },
+      {
+        durationSec: 4,
+        kicker: "The fix",
+        headline: "AI answers and qualifies",
+        highlight: "qualifies",
+        subtext: "It captures the issue, address, and callback number instantly.",
+        visual: "ai_intake",
+      },
+      {
+        durationSec: 4,
+        kicker: "Booked",
+        headline: "The job hits your calendar",
+        highlight: "calendar",
+        subtext: "The caller gets confirmation. Your team gets the details.",
+        visual: "calendar",
+      },
+      {
+        durationSec: 2,
+        kicker: "Next step",
+        headline: "See it on your workflow",
+        highlight: "your workflow",
+        subtext: "A quick walkthrough, no rebuild required.",
+        visual: "cta",
+      },
     ],
   },
-};
+} satisfies LoomProps;
 
 export const RemotionRoot: React.FC = () => {
   return (

@@ -17,7 +17,9 @@
     "daily-cycle": "tsx src/cli/index.ts daily-cycle",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test src/services/sender/mailbox.test.ts"
+    "test": "node --import tsx --test src/services/sender/mailbox.test.ts src/services/tracking.service.test.ts",
+    "verify": "npm run typecheck && npm test",
+    "verify:video": "cd remotion && npx tsc -p tsconfig.json --noEmit && npx remotion still src/index.ts LoomVideo out/test-frame.png --frame=150"
   },
   "dependencies": {
     "csv-parse": "^5.5.6",

@@ -35,19 +35,13 @@ export function buildTrackedContent(args: {
   messageId: string;
   body: string;
   lead: Lead;
+  /** Gmail manual compose inserts plain text, so those URLs need tracking too. */
+  trackTextLinks?: boolean;
 }): { html: string; text: string; links: TrackedLink[] } {
   const { messageId, body, lead } = args;
-  const links: TrackedLink[] = [];
+  const tracked = linkifyBody(body, Boolean(args.trackTextLinks));
 
-  // Replace URLs in the HTML view with tracked redirects.
-  const htmlBody = escapeHtml(body).replace(URL_RE, (url) => {
-    const linkId = token(8);
-    links.push({ linkId, url, label: url });
-    const tracked = trackingUrls.click(linkId);
-    return `<a href="${tracked}">${escapeHtml(url)}</a>`;
-  });
-
-  const htmlWithBreaks = htmlBody.replace(/\n/g, "<br>\n");
+  const htmlWithBreaks = tracked.html.replace(/\n/g, "<br>\n");
   const pixel = `<img src="${trackingUrls.pixel(messageId)}" width="1" height="1" alt="" style="display:none" />`;
 
   const footer = buildFooter(lead);
@@ -57,9 +51,44 @@ ${htmlWithBreaks}
 ${footer.html}
 </div>${pixel}`;
 
-  const text = `${body}\n${footer.text}`;
+  const text = `${tracked.text}\n${footer.text}`;
 
+  return { html, text, links: tracked.links };
+}
+
+function linkifyBody(body: string, trackTextLinks: boolean): { html: string; text: string; links: TrackedLink[] } {
+  const links: TrackedLink[] = [];
+  let html = "";
+  let text = "";
+  let last = 0;
+
+  for (const match of body.matchAll(URL_RE)) {
+    const raw = match[0];
+    const start = match.index ?? 0;
+    const { url, trailing } = stripTrailingPunctuation(raw);
+    const end = start + raw.length;
+    const linkId = token(8);
+    const tracked = trackingUrls.click(linkId);
+
+    links.push({ linkId, url, label: url });
+    html += escapeHtml(body.slice(last, start)) + `<a href="${tracked}">${escapeHtml(url)}</a>${escapeHtml(trailing)}`;
+    text += body.slice(last, start) + (trackTextLinks ? tracked : url) + trailing;
+    last = end;
+  }
+
+  html += escapeHtml(body.slice(last));
+  text += body.slice(last);
   return { html, text, links };
+}
+
+function stripTrailingPunctuation(raw: string): { url: string; trailing: string } {
+  let url = raw;
+  let trailing = "";
+  while (/[.,!?;:]$/.test(url)) {
+    trailing = url.slice(-1) + trailing;
+    url = url.slice(0, -1);
+  }
+  return { url, trailing };
 }
 
 function buildFooter(lead: Lead): { html: string; text: string } {

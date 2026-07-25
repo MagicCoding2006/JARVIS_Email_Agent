@@ -1,13 +1,10 @@
 import { config } from "../config/index.js";
-import { uuid, token } from "../lib/ids.js";
+import { uuid } from "../lib/ids.js";
 import { createLogger } from "../lib/logger.js";
 import { EventsRepo, LeadsRepo, MessagesRepo } from "../repositories/index.js";
 import { buildTrackedContent, trackingUrls } from "./tracking.service.js";
-import type { TrackedLink } from "../models/types.js";
 
 const log = createLogger("compose");
-
-const URL_RE = /https?:\/\/[^\s<>")]+/g;
 
 /**
  * Port of the original "Pixel-Injectable" flow, upgraded to the unified system.
@@ -35,16 +32,13 @@ export async function createGmailPixel(input: {
 
   const messageId = uuid();
 
-  // Swap raw URLs for tracked redirects (kept as plain text for Gmail).
-  const links: TrackedLink[] = [];
-  const trackedBody = input.body.replace(URL_RE, (url) => {
-    const linkId = token(8);
-    links.push({ linkId, url, label: url });
-    return trackingUrls.click(linkId);
-  });
-
   const pixelUrl = trackingUrls.pixel(messageId);
-  const { html, text } = buildTrackedContent({ messageId, body: trackedBody, lead });
+  const { html, text, links } = buildTrackedContent({
+    messageId,
+    body: input.body,
+    lead,
+    trackTextLinks: true,
+  });
 
   await MessagesRepo.create({
     _id: messageId,
@@ -73,7 +67,7 @@ export async function createGmailPixel(input: {
     metadata: { manual: true, subject: input.subject, channel: "gmail" },
   });
 
-  const safeBody = JSON.stringify(trackedBody);
+  const safeBody = JSON.stringify(text);
   const consoleScript = buildConsoleSnippet(safeBody, pixelUrl);
 
   log.info(`created gmail pixel for ${lead.email} (message ${messageId})`);
