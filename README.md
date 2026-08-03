@@ -669,6 +669,7 @@ OPENAI_OAUTH_PROXY_HOST=127.0.0.1
 OPENAI_OAUTH_PROXY_PORT=10531
 OPENAI_OAUTH_FILE=/data/openai-oauth/auth.json
 OPENAI_OAUTH_AUTH_JSON_BASE64=your-base64-auth-json
+OPENAI_OAUTH_AUTH_SEED_VERSION=2026-08-03-1
 
 STRATEGIST_AUTH=openai-oauth-proxy
 STRATEGIST_BASE_URL=http://127.0.0.1:10531/v1
@@ -688,6 +689,9 @@ base64 < /Users/alexlotkov/.codex/auth.json | tr -d '\n' | pbcopy
 
 Paste the clipboard into Railway as `OPENAI_OAUTH_AUTH_JSON_BASE64`. Never put
 that value in Git or `.env.example`; it grants access to the ChatGPT account.
+Set `OPENAI_OAUTH_AUTH_SEED_VERSION` to a new unique value whenever you replace
+the base64 credential. This makes Railway overwrite a stale token on the Volume
+once without replacing later token refreshes on every deploy.
 The harness is unofficial and ChatGPT account limits still apply, so monitor its
 startup logs and keep the persistent volume attached. The proxy refuses to bind
 to a public interface.

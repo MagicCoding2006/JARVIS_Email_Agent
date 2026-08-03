@@ -1,6 +1,5 @@
 import { createLogger } from "./lib/logger.js";
 import { closeDb } from "./lib/mongo.js";
-import { ensureIndexes } from "./repositories/collections.js";
 import { startTrackingServer } from "./server/tracking-server.js";
 import { startScheduler } from "./workers/scheduler.js";
 import { startTelegramBot, stopTelegramBot } from "./chat/telegram.js";
@@ -13,15 +12,23 @@ const log = createLogger("main");
 
 async function main() {
   log.info("starting AI SDR system");
-  await startOAuthHarnessProxy();
   log.info(
     `config: dryRun=${config.sending.dryRun} autonomy=${config.agent.autonomy} ` +
       `worker=${worker.configured ? "on" : "OFF"} strategist=${strategist.configured ? "on" : "OFF"} ` +
       `sender=${getSender().name}`,
   );
 
-  await ensureIndexes();
+  // Bind Railway's public PORT before slower Mongo/OAuth initialization so the
+  // platform health check does not race cold-start dependency setup.
   await startTrackingServer();
+  try {
+    await startOAuthHarnessProxy();
+  } catch (err) {
+    log.error(
+      "OpenAI OAuth harness unavailable; continuing without GPT until credentials are reseeded and the service is redeployed",
+      err,
+    );
+  }
   await startTelegramBot();
   const tasks = startScheduler();
 

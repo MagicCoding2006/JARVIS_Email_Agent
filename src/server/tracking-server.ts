@@ -220,11 +220,15 @@ function publicVideoUrl(videoUrl?: string): string | undefined {
 }
 
 export async function startTrackingServer(): Promise<void> {
-  await ensureIndexes();
   const app = createApp();
-  app.listen(config.tracking.port, () => {
-    log.info(`tracking server listening on :${config.tracking.port} (public: ${config.tracking.baseURL})`);
+  await new Promise<void>((resolve, reject) => {
+    const server = app.listen(config.tracking.port, () => {
+      log.info(`tracking server listening on :${config.tracking.port} (public: ${config.tracking.baseURL})`);
+      resolve();
+    });
+    server.once("error", reject);
   });
+  await ensureIndexes();
 }
 
 // Allow running standalone: `npm run tracking-server`

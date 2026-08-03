@@ -18,16 +18,10 @@ async function authFileExists(path: string): Promise<boolean> {
   }
 }
 
-async function ensureAuthFile(): Promise<void> {
-  const path = config.oauthProxy.authFile;
-  if (await authFileExists(path)) {
-    await chmod(path, 0o600);
-    return;
-  }
-
+function decodeAuthJson(): string {
   if (!config.oauthProxy.authJsonBase64) {
     throw new Error(
-      `OpenAI OAuth credential file is missing at ${path}; set OPENAI_OAUTH_AUTH_JSON_BASE64 for the first boot`,
+      "OPENAI_OAUTH_AUTH_JSON_BASE64 is required to seed OAuth credentials",
     );
   }
 
@@ -36,6 +30,40 @@ async function ensureAuthFile(): Promise<void> {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("OPENAI_OAUTH_AUTH_JSON_BASE64 did not decode to a JSON object");
   }
+  return decoded;
+}
+
+async function readOptionalText(path: string): Promise<string> {
+  try {
+    return (await readFile(path, "utf8")).trim();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return "";
+    throw err;
+  }
+}
+
+async function ensureAuthFile(): Promise<void> {
+  const path = config.oauthProxy.authFile;
+  const markerPath = `${path}.seed-version`;
+  const requestedVersion = config.oauthProxy.authSeedVersion;
+
+  // A changed seed version intentionally replaces a stale persisted token once.
+  // The marker then prevents later deploys from overwriting refreshed tokens.
+  if (requestedVersion && (await readOptionalText(markerPath)) !== requestedVersion) {
+    const decoded = decodeAuthJson();
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await writeFile(path, decoded, { encoding: "utf8", mode: 0o600 });
+    await writeFile(markerPath, `${requestedVersion}\n`, { encoding: "utf8", mode: 0o600 });
+    log.info(`reseeded OAuth credentials at ${path} (version ${requestedVersion})`);
+    return;
+  }
+
+  if (await authFileExists(path)) {
+    await chmod(path, 0o600);
+    return;
+  }
+
+  const decoded = decodeAuthJson();
 
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(path, decoded, { encoding: "utf8", mode: 0o600, flag: "wx" });

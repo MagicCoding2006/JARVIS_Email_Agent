@@ -55,6 +55,7 @@ export const config = {
     port: num("OPENAI_OAUTH_PROXY_PORT", 10531),
     authFile: opt("OPENAI_OAUTH_FILE", "/data/openai-oauth/auth.json"),
     authJsonBase64: opt("OPENAI_OAUTH_AUTH_JSON_BASE64"),
+    authSeedVersion: opt("OPENAI_OAUTH_AUTH_SEED_VERSION"),
   },
   smtp: {
     host: opt("SMTP_HOST", "smtp.gmail.com"),
