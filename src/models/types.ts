@@ -265,6 +265,8 @@ export interface VideoAsset {
   status: VideoStatus;
   /** Final hosted video URL (set once rendered/uploaded). */
   videoUrl?: string;
+  /** Lightweight animated preview for email embeds, usually a short GIF. */
+  previewUrl?: string;
   /** Public tracked URL that redirects to the video and logs watch events. */
   watchUrl: string;
   /** Max observed watch percentage (0–100). */

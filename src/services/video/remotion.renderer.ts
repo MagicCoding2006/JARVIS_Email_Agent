@@ -17,14 +17,15 @@ const NPX = process.platform === "win32" ? "npx.cmd" : "npx";
 /**
  * Render the final mp4 with Remotion. Composites the scene spec over the audio.
  * Requires `cd remotion && npm install` once, and VIDEO_ENABLE_REMOTION=true.
- * Returns the absolute path to the rendered mp4.
+ * Returns the absolute paths to the rendered mp4 and, when Remotion supports it,
+ * a short GIF preview suitable for email embeds.
  */
 export async function renderWithRemotion(args: {
   videoId: string;
   spec: SceneSpec;
   audioPath: string;
   durationSec: number;
-}): Promise<string> {
+}): Promise<{ videoPath: string; previewPath?: string }> {
   if (!config.video.enableRemotion) {
     throw new Error("VIDEO_ENABLE_REMOTION is false — set it true after `cd remotion && npm install`");
   }
@@ -59,7 +60,26 @@ export async function renderWithRemotion(args: {
 
   await run(NPX, renderArgs, REMOTION_DIR);
   log.info(`rendered ${outPath}`);
-  return outPath;
+
+  const previewPath = path.join(outDir, `${args.videoId}-preview.gif`);
+  const previewFrames = Math.min(durationInFrames - 1, FPS * 4 - 1);
+  try {
+    const previewArgs = [
+      "remotion", "render", ENTRY_POINT, "LoomVideo", previewPath,
+      `--props=${propsPath}`,
+      `--frames=0-${previewFrames}`,
+      "--codec=gif",
+      "--scale=0.5",
+    ];
+    if (config.video.renderConcurrency > 0) previewArgs.push(`--concurrency=${config.video.renderConcurrency}`);
+    if (config.video.chromePath) previewArgs.push(`--browser-executable=${config.video.chromePath}`);
+    await run(NPX, previewArgs, REMOTION_DIR);
+    log.info(`rendered ${previewPath}`);
+    return { videoPath: outPath, previewPath };
+  } catch (err) {
+    log.warn("GIF preview render failed; email will use a text video link", err);
+    return { videoPath: outPath };
+  }
 }
 
 async function normalizeLocalAssets(videoId: string, spec: SceneSpec): Promise<SceneSpec> {

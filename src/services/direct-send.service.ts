@@ -1,6 +1,6 @@
 import { config } from "../config/index.js";
 import { uuid } from "../lib/ids.js";
-import { EventsRepo, MessagesRepo } from "../repositories/index.js";
+import { EventsRepo, MessagesRepo, VideosRepo } from "../repositories/index.js";
 import { buildTrackedContent } from "./tracking.service.js";
 import { getSender } from "./sender/index.js";
 import { getMailboxByEmail, senderForMailbox } from "./sender/mailbox.js";
@@ -32,7 +32,8 @@ export async function sendDirectToLead(
       : "Re: our conversation");
 
   const messageId = uuid();
-  const { html, text, links } = buildTrackedContent({ messageId, body: args.body, lead });
+  const video = await VideosRepo.latestForLead(lead._id, lastSent?.campaignId);
+  const { html, text, links } = buildTrackedContent({ messageId, body: args.body, lead, video });
   const headerDomain = fromEmail.split("@")[1] || "localhost";
   const messageIdHeader = `<${messageId}@${headerDomain}>`;
 

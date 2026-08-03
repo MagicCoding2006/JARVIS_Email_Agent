@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { parse } from "csv-parse/sync";
 import { createLogger } from "../lib/logger.js";
 import { closeDb } from "../lib/mongo.js";
-import { ensureIndexes } from "../repositories/collections.js";
+import { ensureIndexes, getCollections } from "../repositories/collections.js";
 import {
   CampaignsRepo,
   EnrollmentsRepo,
@@ -20,6 +20,7 @@ import { runWeeklyReview } from "../workers/weekly-review.js";
 import { runMonthlyReview } from "../workers/monthly-review.js";
 import { handleInboundReply } from "../services/replies.service.js";
 import { imapEnabled, pollReplies } from "../services/imap-poller.service.js";
+import { getMailboxByEmail } from "../services/sender/mailbox.js";
 import { createGmailPixel } from "../services/compose.service.js";
 import { generateVariants, variantLeaderboard, pruneVariants, ensureCampaign } from "../services/variants.service.js";
 import { createVideoForLead, produceVideo } from "../services/video.service.js";
@@ -207,6 +208,85 @@ async function cmdEnroll(p: Parsed) {
 async function cmdDispatch(p: Parsed) {
   const r = await dispatchDue({ ignoreWindow: Boolean(p.flags["ignore-window"]) });
   log.info(`dispatch: ${JSON.stringify(r)}`);
+}
+
+async function cmdRebalanceMailbox(p: Parsed) {
+  const target = str(p.flags.to).trim().toLowerCase();
+  const from = str(p.flags.from).trim().toLowerCase();
+  const limit = int(p.flags.limit, 5);
+  const dryRun = Boolean(p.flags["dry-run"]);
+  if (!target || limit <= 0) {
+    throw new Error("usage: cli rebalance-mailbox --to <mailbox> [--from <mailbox>] [--limit 5] [--dry-run]");
+  }
+  if (!getMailboxByEmail(target)) throw new Error(`target mailbox is not in MAILBOXES: ${target}`);
+  if (from && !getMailboxByEmail(from)) throw new Error(`source mailbox is not in MAILBOXES: ${from}`);
+
+  const c = await getCollections();
+  const match: Record<string, unknown> = { status: "scheduled" };
+  if (from) match.fromEmail = from;
+  else match.fromEmail = { $ne: target };
+
+  const rows = await c.messages
+    .aggregate<{ _id: string; enrollmentId: string; fromEmail: string; toEmail: string; scheduledAt: Date }>([
+      { $match: match },
+      {
+        $lookup: {
+          from: "enrollments",
+          localField: "enrollmentId",
+          foreignField: "_id",
+          as: "enrollment",
+        },
+      },
+      { $unwind: "$enrollment" },
+      { $match: { "enrollment.status": "active" } },
+      {
+        $lookup: {
+          from: "messages",
+          let: { enrollmentId: "$enrollmentId" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$enrollmentId", "$$enrollmentId"] },
+                    { $eq: ["$status", "sent"] },
+                  ],
+                },
+              },
+            },
+            { $limit: 1 },
+          ],
+          as: "priorSent",
+        },
+      },
+      { $match: { priorSent: { $size: 0 } } },
+      { $sort: { scheduledAt: 1 } },
+      { $limit: limit },
+      { $project: { _id: 1, enrollmentId: 1, fromEmail: 1, toEmail: 1, scheduledAt: 1 } },
+    ])
+    .toArray();
+
+  if (!rows.length) {
+    log.info("no safe scheduled messages found to rebalance");
+    return;
+  }
+  const ids = rows.map((r) => r._id);
+  const enrollmentIds = [...new Set(rows.map((r) => r.enrollmentId))];
+  if (dryRun) {
+    log.info(`would move ${ids.length} scheduled message(s) to ${target}`);
+    for (const r of rows) log.info(`  ${r._id} ${r.fromEmail} -> ${target} ${r.toEmail}`);
+    return;
+  }
+
+  await c.messages.updateMany(
+    { _id: { $in: ids } },
+    { $set: { fromEmail: target, updatedAt: new Date() }, $unset: { inReplyTo: "" } },
+  );
+  await c.enrollments.updateMany(
+    { _id: { $in: enrollmentIds } },
+    { $set: { assignedMailbox: target, updatedAt: new Date() } },
+  );
+  log.info(`moved ${ids.length} scheduled message(s) / ${enrollmentIds.length} enrollment(s) to ${target}`);
 }
 
 async function cmdProcessEvents() {
@@ -544,6 +624,7 @@ const HELP = `AI SDR CLI
   activate-campaign <name|id>
   enroll --campaign <name|id> [--status new] [--limit 50] [--lead <email>]
   dispatch [--ignore-window]    send due messages now
+  rebalance-mailbox --to <mailbox> [--from <mailbox>] [--limit 5]   move safe queued first-touch sends
   process-events                score queued events now
   daily-cycle                   run the strategist review + generate variants now
   weekly-review                 industry/persona/variant review + prune now
@@ -592,6 +673,7 @@ async function run() {
     case "activate-campaign": await cmdActivateCampaign(p); break;
     case "enroll": await cmdEnroll(p); break;
     case "dispatch": await cmdDispatch(p); break;
+    case "rebalance-mailbox": await cmdRebalanceMailbox(p); break;
     case "process-events": await cmdProcessEvents(); break;
     case "daily-cycle": await cmdDailyCycle(); break;
     case "weekly-review": await cmdWeeklyReview(); break;

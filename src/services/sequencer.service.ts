@@ -6,6 +6,7 @@ import {
   EnrollmentsRepo,
   LeadsRepo,
   MessagesRepo,
+  VideosRepo,
 } from "../repositories/index.js";
 import { draftEmail } from "./personalization.service.js";
 import { buildTrackedContent } from "./tracking.service.js";
@@ -104,7 +105,8 @@ export async function scheduleNextStep(enrollment: Enrollment): Promise<Message 
   }
 
   const messageId = uuid();
-  const { html, text, links } = buildTrackedContent({ messageId, body: draft.body, lead });
+  const video = await VideosRepo.latestForLead(lead._id, campaign._id);
+  const { html, text, links } = buildTrackedContent({ messageId, body: draft.body, lead, video });
   const scheduledAt = scheduleFromAnchor(enrollment.enrolledAt, step.businessDayOffset);
   const fromEmail = await resolveFromEmail(enrollment, campaign);
 

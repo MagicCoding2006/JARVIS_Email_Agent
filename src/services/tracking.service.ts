@@ -1,6 +1,6 @@
 import { config } from "../config/index.js";
 import { token } from "../lib/ids.js";
-import type { Lead, TrackedLink } from "../models/types.js";
+import type { Lead, TrackedLink, VideoAsset } from "../models/types.js";
 
 const BASE = config.tracking.baseURL;
 
@@ -13,6 +13,7 @@ export const trackingUrls = {
 };
 
 const URL_RE = /https?:\/\/[^\s<>")]+/g;
+const VIDEO_PREVIEW_TOKEN = /\{\{\s*videoPreview\s*\}\}/gi;
 
 function escapeHtml(s: string): string {
   return s
@@ -35,11 +36,31 @@ export function buildTrackedContent(args: {
   messageId: string;
   body: string;
   lead: Lead;
+  video?: Pick<VideoAsset, "_id" | "hook" | "previewUrl" | "watchUrl"> | null;
   /** Gmail manual compose inserts plain text, so those URLs need tracking too. */
   trackTextLinks?: boolean;
 }): { html: string; text: string; links: TrackedLink[] } {
   const { messageId, body, lead } = args;
-  const tracked = linkifyBody(body, Boolean(args.trackTextLinks));
+  const marker = "__VIDEO_PREVIEW_BLOCK__";
+  const hasVideoToken = VIDEO_PREVIEW_TOKEN.test(body);
+  VIDEO_PREVIEW_TOKEN.lastIndex = 0;
+  const bodyForTracking = body.replace(VIDEO_PREVIEW_TOKEN, marker);
+  const tracked = linkifyBody(bodyForTracking, Boolean(args.trackTextLinks));
+  const videoBlock = args.video ? buildVideoPreview(args.video, lead) : null;
+  if (videoBlock) {
+    if (hasVideoToken) {
+      tracked.links.push(videoBlock.link);
+      tracked.html = tracked.html.replaceAll(marker, videoBlock.html);
+      tracked.text = tracked.text.replaceAll(marker, videoBlock.text);
+    } else if (args.video?.previewUrl) {
+      tracked.links.push(videoBlock.link);
+      tracked.html = `${tracked.html}\n\n${videoBlock.html}`;
+      tracked.text = `${tracked.text}\n\n${videoBlock.text}`;
+    }
+  } else {
+    tracked.html = tracked.html.replaceAll(marker, "");
+    tracked.text = tracked.text.replaceAll(marker, "");
+  }
 
   const htmlWithBreaks = tracked.html.replace(/\n/g, "<br>\n");
   const pixel = `<img src="${trackingUrls.pixel(messageId)}" width="1" height="1" alt="" style="display:none" />`;
@@ -54,6 +75,33 @@ ${footer.html}
   const text = `${tracked.text}\n${footer.text}`;
 
   return { html, text, links: tracked.links };
+}
+
+function buildVideoPreview(
+  video: Pick<VideoAsset, "_id" | "hook" | "previewUrl" | "watchUrl">,
+  lead: Lead,
+): { html: string; text: string; link: TrackedLink } {
+  const linkId = token(8);
+  const tracked = trackingUrls.click(linkId);
+  const hook = video.hook || "quick video";
+  const company = lead.company || "your team";
+  const link = { linkId, url: video.watchUrl, label: `video:${video._id}` };
+
+  if (!video.previewUrl) {
+    return {
+      link,
+      html: `<a href="${tracked}">${escapeHtml(hook)}</a>`,
+      text: `${hook}: ${video.watchUrl}`,
+    };
+  }
+
+  const alt = `${hook} for ${company}`;
+  const html =
+    `<a href="${tracked}" style="text-decoration:none;display:inline-block;margin:8px 0 2px">` +
+    `<img src="${escapeHtml(video.previewUrl)}" width="480" alt="${escapeHtml(alt)}" ` +
+    `style="display:block;max-width:100%;height:auto;border:1px solid #d8d8d8;border-radius:6px" />` +
+    `</a>`;
+  return { html, text: `${hook}: ${video.watchUrl}`, link };
 }
 
 function linkifyBody(body: string, trackTextLinks: boolean): { html: string; text: string; links: TrackedLink[] } {

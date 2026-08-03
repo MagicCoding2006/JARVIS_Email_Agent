@@ -664,6 +664,16 @@ export const VideosRepo = {
     return c.videos.findOne({ _id: id });
   },
 
+  async latestForLead(leadId: string, campaignId?: string): Promise<VideoAsset | null> {
+    const c = await getCollections();
+    const filter: Record<string, unknown> = {
+      leadId,
+      status: { $in: ["scripted", "rendering", "rendered", "uploaded"] },
+    };
+    if (campaignId) filter.campaignId = { $in: [campaignId, undefined, null] };
+    return c.videos.find(filter).sort({ updatedAt: -1, createdAt: -1 }).limit(1).next();
+  },
+
   async setStatus(id: string, status: VideoStatus, videoUrl?: string, error?: string): Promise<void> {
     const c = await getCollections();
     await c.videos.updateOne(
@@ -679,6 +689,11 @@ export const VideosRepo = {
         ...(status === "uploaded" || status === "rendered" ? { $unset: { error: "" } } : {}),
       },
     );
+  },
+
+  async setPreviewUrl(id: string, previewUrl: string): Promise<void> {
+    const c = await getCollections();
+    await c.videos.updateOne({ _id: id }, { $set: { previewUrl, updatedAt: now() } });
   },
 
   async recordWatch(id: string, percent: number): Promise<void> {

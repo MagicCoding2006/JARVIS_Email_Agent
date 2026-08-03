@@ -268,8 +268,11 @@ export async function produceVideo(
       ctaUrl: config.booking.url || undefined,
       ctaLabel: config.booking.ctaLabel || `Book a ${config.booking.meetingMinutes}-min demo`,
     });
-    const mp4 = await renderWithRemotion({ videoId, spec, audioPath, durationSec });
-    await VideosRepo.setStatus(videoId, "uploaded", trackingUrls.videoFile(path.basename(mp4)));
+    const rendered = await renderWithRemotion({ videoId, spec, audioPath, durationSec });
+    await VideosRepo.setStatus(videoId, "uploaded", trackingUrls.videoFile(path.basename(rendered.videoPath)));
+    if (rendered.previewPath) {
+      await VideosRepo.setPreviewUrl(videoId, trackingUrls.videoFile(path.basename(rendered.previewPath)));
+    }
     log.info(`produced video ${videoId}`);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);

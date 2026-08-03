@@ -1,7 +1,7 @@
 import { config } from "../config/index.js";
 import { uuid } from "../lib/ids.js";
 import { createLogger } from "../lib/logger.js";
-import { EventsRepo, LeadsRepo, MessagesRepo } from "../repositories/index.js";
+import { EventsRepo, LeadsRepo, MessagesRepo, VideosRepo } from "../repositories/index.js";
 import { buildTrackedContent, trackingUrls } from "./tracking.service.js";
 
 const log = createLogger("compose");
@@ -33,10 +33,12 @@ export async function createGmailPixel(input: {
   const messageId = uuid();
 
   const pixelUrl = trackingUrls.pixel(messageId);
+  const video = await VideosRepo.latestForLead(lead._id, input.campaignId);
   const { html, text, links } = buildTrackedContent({
     messageId,
     body: input.body,
     lead,
+    video,
     trackTextLinks: true,
   });
 
