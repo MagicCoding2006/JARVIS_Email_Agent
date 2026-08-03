@@ -76,6 +76,7 @@ export const autoEnroll: Tool = {
     const leads = await LeadsRepo.listUnenrolled(
       (args.status ?? "new") as LeadStatus,
       take,
+      args.industry,
     );
     let created = 0;
     for (const l of leads) {
