@@ -2,7 +2,7 @@ import { config } from "../config/index.js";
 import { createLogger } from "../lib/logger.js";
 import { getUpdates, sendMessage, answerCallbackQuery, type TelegramUpdate } from "./telegram-client.js";
 import { handleChat, resetChat } from "../agent/agent.js";
-import { executeApproval, denyApproval } from "../agent/approvals.js";
+import { executeApproval, denyApproval, formatApprovalMessage } from "../agent/approvals.js";
 import { ApprovalsRepo } from "../repositories/index.js";
 
 const log = createLogger("telegram-bot");
@@ -112,7 +112,7 @@ async function handleUpdate(u: TelegramUpdate): Promise<void> {
       await sendMessage("No pending approvals.", { chatId });
     } else {
       for (const a of pending) {
-        await sendMessage(`🔐 ${a.summary}`, {
+        await sendMessage(formatApprovalMessage(a), {
           chatId,
           buttons: [[
             { text: "✅ Approve", data: `approve:${a._id}` },

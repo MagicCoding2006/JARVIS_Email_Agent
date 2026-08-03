@@ -5,6 +5,34 @@ import { sendMessage } from "../chat/telegram-client.js";
 import type { Approval } from "../models/types.js";
 
 const log = createLogger("approvals");
+const APPROVAL_PREVIEW_LIMIT = 3200;
+
+function truncate(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
+/** Keep Telegram approval cards readable even when the stored args contain full files. */
+export function formatApprovalMessage(a: Pick<Approval, "_id" | "tool" | "args" | "summary">): string {
+  if (a.tool === "propose_code_change") {
+    const title = typeof a.args.title === "string" ? a.args.title : "Code change";
+    const description = typeof a.args.description === "string" ? a.args.description : "";
+    const changes = Array.isArray(a.args.changes) ? a.args.changes : [];
+    const files = changes
+      .map((change) => {
+        if (!change || typeof change !== "object" || !("path" in change)) return "";
+        return typeof change.path === "string" ? change.path : "";
+      })
+      .filter(Boolean);
+    return truncate(
+      `🔐 Approval needed: code PR\n\n${title}\n\n${description}` +
+        `${files.length ? `\n\nFiles (${files.length}):\n${files.map((file) => `- ${file}`).join("\n")}` : ""}` +
+        `\n\nApproval ID: ${a._id}`,
+      APPROVAL_PREVIEW_LIMIT,
+    );
+  }
+
+  return truncate(`🔐 Approval needed\n\n${a.summary}\n\nApproval ID: ${a._id}`, APPROVAL_PREVIEW_LIMIT);
+}
 
 /** Persist a pending high-risk action and ping the human (Telegram buttons). */
 export async function requestApproval(
@@ -14,7 +42,7 @@ export async function requestApproval(
   chatId?: string,
 ): Promise<Approval> {
   const a = await ApprovalsRepo.create(tool, args, summary);
-  await sendMessage(`🔐 Approval needed\n\n${summary}`, {
+  await sendMessage(formatApprovalMessage(a), {
     chatId,
     buttons: [[
       { text: "✅ Approve", data: `approve:${a._id}` },

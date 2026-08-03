@@ -14,11 +14,22 @@ export interface InlineButton {
   data: string;
 }
 
-export async function sendMessage(
-  text: string,
-  opts: { chatId?: string; buttons?: InlineButton[][] } = {},
-): Promise<void> {
-  if (!config.telegram.botToken) return;
+const TELEGRAM_TEXT_LIMIT = 4000;
+
+function splitText(text: string): string[] {
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > TELEGRAM_TEXT_LIMIT) {
+    let splitAt = remaining.lastIndexOf("\n", TELEGRAM_TEXT_LIMIT);
+    if (splitAt < TELEGRAM_TEXT_LIMIT / 2) splitAt = TELEGRAM_TEXT_LIMIT;
+    chunks.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt).replace(/^\n/, "");
+  }
+  if (remaining || chunks.length === 0) chunks.push(remaining);
+  return chunks;
+}
+
+async function sendMessageChunk(text: string, opts: { chatId?: string; buttons?: InlineButton[][] }): Promise<void> {
   const chat_id = opts.chatId ?? config.telegram.chatId;
   if (!chat_id) return;
   const body: Record<string, unknown> = { chat_id, text, disable_web_page_preview: true };
@@ -27,13 +38,27 @@ export async function sendMessage(
       inline_keyboard: opts.buttons.map((row) => row.map((b) => ({ text: b.text, callback_data: b.data }))),
     };
   }
+  const res = await fetch(api("sendMessage"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) log.warn(`sendMessage ${res.status}: ${await res.text()}`);
+}
+
+export async function sendMessage(
+  text: string,
+  opts: { chatId?: string; buttons?: InlineButton[][] } = {},
+): Promise<void> {
+  if (!config.telegram.botToken) return;
   try {
-    const res = await fetch(api("sendMessage"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) log.warn(`sendMessage ${res.status}: ${await res.text()}`);
+    const chunks = splitText(text);
+    for (let i = 0; i < chunks.length; i++) {
+      await sendMessageChunk(chunks[i], {
+        chatId: opts.chatId,
+        buttons: i === chunks.length - 1 ? opts.buttons : undefined,
+      });
+    }
   } catch (err) {
     log.error("sendMessage failed", err);
   }
