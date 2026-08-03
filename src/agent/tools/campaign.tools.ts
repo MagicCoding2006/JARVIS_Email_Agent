@@ -1,6 +1,5 @@
 import { schema, type Tool } from "./types.js";
 import { CampaignsRepo, LeadsRepo } from "../../repositories/index.js";
-import { CONTRACTOR_SEQUENCE } from "../../services/sequences/contractor-sequence.js";
 import { DEFAULT_SEQUENCE } from "../../services/sequences/default-sequence.js";
 import { NURTURE_SEQUENCE } from "../../services/sequences/nurture-sequence.js";
 import { enrollLead } from "../../services/sequencer.service.js";
@@ -21,7 +20,7 @@ export const listCampaigns: Tool = {
 export const createCampaign: Tool = {
   name: "create_campaign",
   description:
-    "Create a new campaign. Sequence styles: 'cold' (default 7-touch: intro, bump, proof, new-angle, quick-question, why-now, breakup over ~5 weeks) or 'nurture' (education-led 7-touch: value intro, expand, problem deep-dive, solution framework, differentiation, objection handler, direct offer over ~3 weeks). Starts in DRAFT until activated. HIGH RISK.",
+    "Create a new campaign. Sequence styles: 'cold' (default 7-touch over ~5 weeks), 'nurture' (education-led 7-touch over ~3 weeks), or 'contractor' (7-touch missed-call recovery sequence over ~6 weeks with video offered before linked). Starts in DRAFT until activated. HIGH RISK.",
   risk: "high",
   parameters: schema(
     {
