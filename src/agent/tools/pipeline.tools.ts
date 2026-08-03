@@ -56,10 +56,11 @@ export const autoEnroll: Tool = {
       campaign: { type: "string", description: "Name or id of an ACTIVE campaign" },
       status: { type: "string", description: "Lead status to enroll (default 'new')" },
       limit: { type: "number", description: "Max leads to enroll (further capped by today's remaining budget)" },
+      industry: { type: "string", description: "Optional: only enroll leads whose industry matches (case-insensitive)" },
     },
     ["campaign"],
   ),
-  async run(args: { campaign: string; status?: string; limit?: number }) {
+  async run(args: { campaign: string; status?: string; limit?: number; industry?: string }) {
     const c = await ensureCampaign(args.campaign);
     if (!c) return { error: `campaign not found: ${args.campaign}` };
     if (c.status !== "active") {
