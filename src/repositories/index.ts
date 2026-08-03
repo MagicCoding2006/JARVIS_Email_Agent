@@ -141,7 +141,7 @@ export const LeadsRepo = {
    * Fixes the bug where auto_enroll/enroll_leads return the same already-enrolled
    * leads every call (enrollment doesn't change lead status from "new").
    */
-  async listUnenrolled(status: LeadStatus, limit: number): Promise<Lead[]> {
+  async listUnenrolled(status: LeadStatus, limit: number, industry?: string): Promise<Lead[]> {
     const c = await getCollections();
     const activeEnrollments = await c.enrollments
       .find({ status: "active" })
@@ -151,6 +151,9 @@ export const LeadsRepo = {
     const filter: Record<string, unknown> = { status };
     if (enrolledIds.length > 0) {
       filter._id = { $nin: enrolledIds };
+    }
+    if (industry) {
+      filter.industry = { $regex: industry, $options: "i" };
     }
     return c.leads.find(filter).sort({ score: -1, createdAt: -1 }).limit(limit).toArray();
   },
