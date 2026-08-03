@@ -7,6 +7,7 @@ import { toOpenAITool, type ToolContext } from "./tools/types.js";
 import { needsApproval } from "./autonomy.js";
 import { requestApproval } from "./approvals.js";
 import { PlaybookRepo } from "../repositories/index.js";
+import { trimChatHistory } from "./history.js";
 
 const log = createLogger("agent");
 
@@ -169,11 +170,8 @@ export async function handleChat(text: string, sessionId = "default", approvalCh
   let history = await getHistory(sessionId);
   history.push({ role: "user", content: text });
   const reply = await runAgent(history, "chat", approvalChatId);
-  // Trim to keep the system message + the last ~24 turns.
-  if (history.length > 26) {
-    history = [history[0], ...history.slice(-24)];
-    histories.set(sessionId, history);
-  }
+  history = trimChatHistory(history, 26);
+  histories.set(sessionId, history);
   return reply;
 }
 

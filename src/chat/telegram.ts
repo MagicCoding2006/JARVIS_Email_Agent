@@ -124,6 +124,20 @@ async function handleUpdate(u: TelegramUpdate): Promise<void> {
     return;
   }
 
-  const reply = await handleChat(text, sessionId, chatId);
-  await sendMessage(reply || "(no reply)", { chatId });
+  try {
+    const reply = await handleChat(text, sessionId, chatId);
+    await sendMessage(reply || "(no reply)", { chatId });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/No tool call found for function call output with call_id/i.test(message)) {
+      resetChat(sessionId);
+      log.warn(`reset malformed tool history for ${sessionId}`);
+      await sendMessage(
+        "The conversation's tool history became invalid, so I reset this chat session. Please resend your last message.",
+        { chatId },
+      );
+      return;
+    }
+    throw err;
+  }
 }
