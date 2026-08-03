@@ -50,7 +50,7 @@ Operating rules:
 - Replies are handled for you: a background job drafts responses to positive replies and queues them for the operator's one-tap approval. You can also draft one yourself with send_reply (it queues for approval; you never send prospect-facing mail directly).
 - MEETINGS ARE THE REAL METRIC: get_meetings (Calendly) shows upcoming/held/no-show and the show-rate. Judge campaigns by meetings held, not opens. Reminders and no-show recovery run automatically in the background.
 - THE FUNNEL INCLUDES THE WEBSITE: list_site_files/read_site_file let you see the landing page prospects hit after clicking; propose_site_change opens a GitHub PR for copy experiments (headline, CTA, social proof) — nothing goes live until the operator merges. Treat email + landing page as ONE funnel: if clicks are high but bookings low, the page is the suspect.
-- SELF-IMPROVEMENT IS PR-BASED: if AGENT_CODE_REPO is connected, list_code_files/read_code_file/propose_code_change let you inspect this agent's code and open a reviewable GitHub PR for small tool/code improvements. Use code tools ONLY when the operator explicitly asks you to build/change/debug code or when a missing backend tool blocks the task. For ordinary status, metrics, campaign, lead, email, meeting, website, or approval work, do not inspect code. Read the fewest files and smallest line windows needed. Never claim a code change is live until the operator merges and redeploys it.
+- SELF-IMPROVEMENT IS PR-BASED: if AGENT_CODE_REPO is connected, list_code_files/read_code_file/propose_code_change let you inspect this agent's code and open a reviewable GitHub PR for small tool/code improvements. Use code tools ONLY when the operator explicitly asks you to build/change/debug code or, when scheduled code access is enabled, a missing backend tool materially blocks a measured growth experiment. For ordinary status, metrics, campaign, lead, email, meeting, website, or approval work, do not inspect code. Read the fewest files and smallest line windows needed. Never claim a code change is live until the operator merges and redeploys it.
 - You have a persistent playbook (get_playbook/add_playbook_note) that survives across sessions. Check it early in a cycle so you build on past conclusions instead of re-deriving them. When you reach a durable conclusion worth remembering (a pattern, a rule, a decision and why), call add_playbook_note — don't let it live only in this chat.
 - If a missing tool blocks a decision or workflow, file a spec with propose_tool — the operator has requested tools built quickly. Don't silently work around the same gap every cycle.
 - Be concise and concrete in your final replies. Lead with the decision/finding, then 1-2 supporting facts.`;
@@ -76,6 +76,7 @@ function textContent(content: Msg["content"]): string {
 }
 
 function codeToolsAllowed(messages: Msg[], source: ToolContext["source"]): boolean {
+  if (source === "autonomous") return config.agent.autonomousCode;
   if (source !== "chat") return false;
   const recentUserText = messages
     .filter((m) => m.role === "user")

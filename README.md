@@ -77,6 +77,23 @@ FROM_EMAIL=
 FROM_NAME=
 ```
 
+If you want the worker model to use the OpenAI OAuth harness instead of an API
+key, authenticate once:
+
+```bash
+npx openai-oauth login
+```
+
+Then set:
+
+```env
+WORKER_AUTH=openai-oauth
+WORKER_MODEL=gpt-5.4-mini
+```
+
+Leave `STRATEGIST_AUTH=api-key` unless you also want the strategist role to use
+your ChatGPT OAuth account.
+
 Keep this on while testing:
 
 ```env
@@ -201,6 +218,9 @@ Behavior:
 - `TELEGRAM_ALLOWED_USER_IDS` lets trusted Telegram users talk to the bot from private chats or groups.
 - `TELEGRAM_ALLOWED_CHAT_IDS` authorizes everyone in a specific group/chat.
 - Under `AGENT_AUTONOMY=semi`, low-risk tools run automatically and high-risk actions require approval.
+- Set `AGENT_AUTONOMOUS_CODE=true` only if scheduled cycles should inspect
+  `AGENT_CODE_REPO` and prepare approval-gated self-improvement PRs. The agent
+  never merges or deploys its own changes.
 
 Useful commands in Telegram:
 
@@ -551,6 +571,12 @@ review     # one strategist review + experiment generation
 autonomous # full tool-using agent cycle, highest token usage
 ```
 
+The autonomous cycle runs explicit offer-value, email-content, funnel, scaling,
+and learning loops. Keep `AGENT_AUTONOMY=semi` in production so research,
+analysis, variants, playbook updates, and bounded pace changes can run while live
+offers, campaign launches, outbound replies, and code changes still require an
+operator approval.
+
 Hypotheses:
 
 ```bash
@@ -628,6 +654,24 @@ For Railway:
 - Set `TRACKING_BASE_URL` to the Railway public URL.
 - Keep only one running Telegram poller for a bot token. If local and Railway both run, one can consume updates before the other.
 - Do not commit `.env`.
+
+For a production GPT strategist on Railway, use an OpenAI API project key:
+
+```env
+STRATEGIST_AUTH=api-key
+STRATEGIST_BASE_URL=https://api.openai.com/v1
+STRATEGIST_API_KEY=your-openai-api-project-key
+STRATEGIST_MODEL=gpt-5.5
+AGENT_DAILY_MODE=autonomous
+AGENT_AUTONOMY=semi
+AGENT_MAX_STEPS=12
+AGENT_AUTONOMOUS_CODE=false
+```
+
+The `openai-oauth` harness is intended here for local evaluation. It depends on
+a private ChatGPT credential file and a local proxy process; do not treat a
+personal ChatGPT login as a durable Railway production credential. ChatGPT and
+OpenAI API billing/access are separate.
 
 If video rendering on the server:
 

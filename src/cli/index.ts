@@ -36,6 +36,7 @@ import { runAutonomousCycle } from "../workers/autonomous-cycle.js";
 import { executeApproval, denyApproval } from "../agent/approvals.js";
 import { ApprovalsRepo, HypothesesRepo } from "../repositories/index.js";
 import { evaluateHypotheses } from "../services/experiments.service.js";
+import { strategist, worker } from "../llm/roles.js";
 import type { EventType, LeadStatus, VideoPurpose } from "../models/types.js";
 
 const csv = (v: string | boolean | undefined) =>
@@ -292,6 +293,15 @@ async function cmdRebalanceMailbox(p: Parsed) {
 async function cmdProcessEvents() {
   const r = await processEvents();
   log.info(`processed ${r.processed} events`);
+}
+
+async function cmdLlmSmoke(p: Parsed) {
+  const roleName = str(p.flags.role, "worker");
+  const prompt = str(p.flags.prompt, "Reply with exactly: ok");
+  const client = roleName === "strategist" ? strategist : worker;
+  if (!client.configured) throw new Error(`${roleName} LLM is not configured`);
+  const text = await client.complete(prompt, { maxTokens: 50, temperature: 0 });
+  log.info(`${roleName}: ${text}`);
 }
 
 async function cmdDailyCycle() {
@@ -625,6 +635,7 @@ const HELP = `AI SDR CLI
   enroll --campaign <name|id> [--status new] [--limit 50] [--lead <email>]
   dispatch [--ignore-window]    send due messages now
   rebalance-mailbox --to <mailbox> [--from <mailbox>] [--limit 5]   move safe queued first-touch sends
+  llm-smoke [--role worker|strategist] [--prompt "..."]   test LLM auth/config
   process-events                score queued events now
   daily-cycle                   run the strategist review + generate variants now
   weekly-review                 industry/persona/variant review + prune now
@@ -674,6 +685,7 @@ async function run() {
     case "enroll": await cmdEnroll(p); break;
     case "dispatch": await cmdDispatch(p); break;
     case "rebalance-mailbox": await cmdRebalanceMailbox(p); break;
+    case "llm-smoke": await cmdLlmSmoke(p); break;
     case "process-events": await cmdProcessEvents(); break;
     case "daily-cycle": await cmdDailyCycle(); break;
     case "weekly-review": await cmdWeeklyReview(); break;

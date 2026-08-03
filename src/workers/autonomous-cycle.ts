@@ -6,15 +6,16 @@ import type OpenAI from "openai";
 
 const log = createLogger("autonomous-cycle");
 
-const DIRECTIVE = `Run your daily operating cycle now:
-1. Review the last 24h metrics and the 7-day breakdowns by industry and campaign.
-2. KEEP THE MACHINE FED: check get_pipeline_inventory. If active campaigns have capacity and unenrolled leads exist, auto_enroll (prefer the best-performing campaign). If the lead tank is low (< ~14 days of runway), run discover_leads targeting the segments that perform best.
-3. For each ACTIVE campaign: check the variant leaderboard, prune clear losers, and generate fresh variants for weak/under-tested steps.
-4. Identify the best and worst segments. If something is clearly working, propose scaling it; if a new offer/segment is worth testing, PROPOSE it (high-risk actions will be queued for my approval — do not assume they ran).
-5. Check get_meetings: how many held vs no-show this week? If clicks are healthy but bookings are weak, inspect the landing page (read_site_file) and consider a propose_site_change experiment.
-6. Check get_send_pace and reply/bounce quality. If sends are clean and engagement is healthy, consider raising pace with set_send_pace; if quality is degrading, pull back. Always give a reason.
-7. If you reached a durable conclusion worth remembering, call add_playbook_note. If a missing tool blocked you, file it with propose_tool.
-8. Finish with a short summary: what you did automatically, and what is awaiting my approval.`;
+const DIRECTIVE = `Run the daily growth operating cycle. Use real evidence and take bounded action instead of only writing recommendations.
+
+1. MEMORY + EVIDENCE: read the playbook, then review 24h metrics, 7-day campaign/industry breakdowns, hypotheses, variants, meetings, and pipeline inventory. Opens are directional; optimize for positive replies, held meetings, and closed-won events. Do not declare winners without a meaningful sample.
+2. MARKET RESEARCH: when an offer or segment is weak or uncertain, use web_search for current pains, alternatives, competitor positioning, and prospect language. Save only sourced, relevant findings; never invent market facts.
+3. OFFER LOOP: score each active offer on dream outcome, perceived likelihood, time-to-result, and customer effort. Pick the weakest lever. Propose exactly one measurable offer-component change at a time (deliverable, bonus, guarantee, honest urgency, name, or price structure), with a hypothesis, target segment, success metric, minimum sample, and stop condition. Use change_offer only when evidence justifies a live test; it may require approval. Never fabricate proof or scarcity.
+4. EMAIL CONTENT LOOP: evaluate existing hypotheses first. For each active campaign, inspect the variant leaderboard, prune only statistically credible losers, and generate variants for weak or under-tested steps. Test one variable per experiment: subject, hook, value mechanism, CTA, length, personalization depth, or video-preview framing. Use draft_step_template and set_step_template only for a deliberate structural test; the writer model authors prospect-facing copy.
+5. FUNNEL LOOP: compare send -> reply -> meeting -> show -> close. If clicks are healthy but bookings are weak, inspect the landing page and propose one focused page experiment. If meetings book but do not show, diagnose reminders/qualification before changing email copy.
+6. SCALE LOOP: keep strong active campaigns supplied. Auto-enroll within the daily budget and use free discovery when runway is below about 14 days. Adjust send pace only inside hard caps: scale on clean delivery plus positive downstream signal; reduce pace on bounce, unsubscribe, or reply-quality deterioration.
+7. LEARNING LOOP: record durable conclusions and rejected ideas in the playbook, including the evidence and date. If a missing tool blocks a measured experiment, file a precise tool request. When scheduled code access is enabled, you may inspect the code and prepare a small approval-gated PR, but never merge or deploy it.
+8. Finish with: decisions made, actions completed, experiments now running, approvals pending, and the next evidence threshold that will trigger another change.`;
 
 /**
  * The agent-driven daily cycle. This is the "GLM runs the funnel" loop: the

@@ -35,14 +35,18 @@ export const config = {
   },
   llm: {
     worker: {
+      auth: (opt("WORKER_AUTH", "api-key") as "api-key" | "openai-oauth"),
       baseURL: opt("WORKER_BASE_URL", "https://api.openai.com/v1"),
       apiKey: opt("WORKER_API_KEY"),
       model: opt("WORKER_MODEL", "gpt-5.4-mini"),
+      oauthFile: opt("WORKER_OAUTH_FILE") || opt("OPENAI_OAUTH_FILE"),
     },
     strategist: {
+      auth: (opt("STRATEGIST_AUTH", "api-key") as "api-key" | "openai-oauth"),
       baseURL: opt("STRATEGIST_BASE_URL", "https://api.z.ai/api/paas/v4"),
       apiKey: opt("STRATEGIST_API_KEY"),
       model: opt("STRATEGIST_MODEL", "glm-5.2"),
+      oauthFile: opt("STRATEGIST_OAUTH_FILE") || opt("OPENAI_OAUTH_FILE"),
     },
   },
   smtp: {
@@ -165,7 +169,11 @@ export const config = {
     // "semi" = low-risk auto, high-risk needs approval; "propose" = approve all;
     // "full" = act within hard caps. See src/agent/autonomy.ts.
     autonomy: (opt("AGENT_AUTONOMY", "semi") as "semi" | "propose" | "full"),
-    maxSteps: num("AGENT_MAX_STEPS", 8),
+    maxSteps: num("AGENT_MAX_STEPS", 12),
+    // Scheduled cycles normally cannot inspect or change their own code. Opt in
+    // to let the brain prepare approval-gated PRs when a missing capability is
+    // blocking growth; it still cannot merge or deploy them.
+    autonomousCode: bool("AGENT_AUTONOMOUS_CODE", false),
     // Hard ceiling on paid lead-sourcing per agent action, regardless of autonomy.
     maxLeadsPerSource: num("AGENT_MAX_LEADS_PER_SOURCE", 25),
     // Hard ceilings the agent's set_send_pace tool can never exceed, however it

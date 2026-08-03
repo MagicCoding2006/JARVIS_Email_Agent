@@ -26,6 +26,8 @@
     "verify:video": "cd remotion && npx tsc -p tsconfig.json --noEmit && npx remotion still src/index.ts LoomVideo out/test-frame.png --frame=150"
   },
   "dependencies": {
+    "@openai-oauth/local": "^2.0.0",
+    "@openai-oauth/openai-client": "^2.0.0",
     "csv-parse": "^5.5.6",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",

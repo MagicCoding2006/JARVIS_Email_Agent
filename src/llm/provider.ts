@@ -1,10 +1,14 @@
 import OpenAI from "openai";
+import { createOpenAIOptions } from "@openai-oauth/openai-client";
+import { openaiCredentials } from "@openai-oauth/local";
 import { createLogger } from "../lib/logger.js";
 
 export interface LLMRoleConfig {
+  auth: "api-key" | "openai-oauth";
   baseURL: string;
   apiKey: string;
   model: string;
+  oauthFile?: string;
 }
 
 export interface CompleteOptions {
@@ -25,17 +29,27 @@ export class LLMClient {
   private baseURL: string;
   private model: string;
   private label: string;
+  private auth: LLMRoleConfig["auth"];
   private log: ReturnType<typeof createLogger>;
 
   constructor(label: string, cfg: LLMRoleConfig) {
     this.label = label;
-    this.baseURL = cfg.baseURL;
+    this.auth = cfg.auth;
+    this.baseURL = cfg.auth === "openai-oauth" ? "openai-oauth" : cfg.baseURL;
     this.model = cfg.model;
-    this.client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey || "missing-key" });
+    this.client =
+      cfg.auth === "openai-oauth"
+        ? new OpenAI(
+            createOpenAIOptions(openaiCredentials({ authFilePath: cfg.oauthFile || undefined })) as unknown as ConstructorParameters<
+              typeof OpenAI
+            >[0],
+          )
+        : new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey || "missing-key" });
     this.log = createLogger(`llm:${label}`);
   }
 
   get configured(): boolean {
+    if (this.auth === "openai-oauth") return true;
     return Boolean(this.client.apiKey && this.client.apiKey !== "missing-key");
   }
 
