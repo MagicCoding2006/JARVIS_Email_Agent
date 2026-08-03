@@ -106,7 +106,7 @@ export const enrollLeads: Tool = {
       campaign: { type: "string" },
       status: { type: "string", description: "Lead status to enroll (default 'new')" },
       limit: { type: "number", description: "Max leads to enroll (default 25)" },
-      industry: { type: "string", description: "Optional: case-insensitive industry filter (e.g. 'construction', 'roofing')" },
+      industry: { type: "string", description: "Optional: only enroll leads whose industry matches (case-insensitive)" },
     },
     ["campaign"],
   ),
