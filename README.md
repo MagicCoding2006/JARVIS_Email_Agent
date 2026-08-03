@@ -77,22 +77,27 @@ FROM_EMAIL=
 FROM_NAME=
 ```
 
-If you want the worker model to use the OpenAI OAuth harness instead of an API
-key, authenticate once:
+To use the OpenAI OAuth harness locally instead of an API key, authenticate once:
 
 ```bash
 npx openai-oauth login
 ```
 
-Then set:
+Then let the application start the harness and route the Telegram strategist to
+it:
 
 ```env
-WORKER_AUTH=openai-oauth
-WORKER_MODEL=gpt-5.4-mini
+OPENAI_OAUTH_PROXY_ENABLED=true
+OPENAI_OAUTH_FILE=/Users/alexlotkov/.codex/auth.json
+
+STRATEGIST_AUTH=openai-oauth-proxy
+STRATEGIST_BASE_URL=http://127.0.0.1:10531/v1
+STRATEGIST_MODEL=gpt-5.5
 ```
 
-Leave `STRATEGIST_AUTH=api-key` unless you also want the strategist role to use
-your ChatGPT OAuth account.
+No `STRATEGIST_API_KEY` is needed in this mode. The worker can use the same
+proxy by setting its auth/base URL/model the same way, or remain on a separate
+lower-cost provider.
 
 Keep this on while testing:
 
@@ -655,12 +660,18 @@ For Railway:
 - Keep only one running Telegram poller for a bot token. If local and Railway both run, one can consume updates before the other.
 - Do not commit `.env`.
 
-For a production GPT strategist on Railway, use an OpenAI API project key:
+To run the authenticated ChatGPT harness inside the Railway service without an
+OpenAI API key, add a persistent Railway Volume mounted at `/data`, then set:
 
 ```env
-STRATEGIST_AUTH=api-key
-STRATEGIST_BASE_URL=https://api.openai.com/v1
-STRATEGIST_API_KEY=your-openai-api-project-key
+OPENAI_OAUTH_PROXY_ENABLED=true
+OPENAI_OAUTH_PROXY_HOST=127.0.0.1
+OPENAI_OAUTH_PROXY_PORT=10531
+OPENAI_OAUTH_FILE=/data/openai-oauth/auth.json
+OPENAI_OAUTH_AUTH_JSON_BASE64=your-base64-auth-json
+
+STRATEGIST_AUTH=openai-oauth-proxy
+STRATEGIST_BASE_URL=http://127.0.0.1:10531/v1
 STRATEGIST_MODEL=gpt-5.5
 AGENT_DAILY_MODE=autonomous
 AGENT_AUTONOMY=semi
@@ -668,10 +679,18 @@ AGENT_MAX_STEPS=12
 AGENT_AUTONOMOUS_CODE=false
 ```
 
-The `openai-oauth` harness is intended here for local evaluation. It depends on
-a private ChatGPT credential file and a local proxy process; do not treat a
-personal ChatGPT login as a durable Railway production credential. ChatGPT and
-OpenAI API billing/access are separate.
+On this Mac, copy the already-authenticated file into the Railway variable
+without printing it:
+
+```bash
+base64 < /Users/alexlotkov/.codex/auth.json | tr -d '\n' | pbcopy
+```
+
+Paste the clipboard into Railway as `OPENAI_OAUTH_AUTH_JSON_BASE64`. Never put
+that value in Git or `.env.example`; it grants access to the ChatGPT account.
+The harness is unofficial and ChatGPT account limits still apply, so monitor its
+startup logs and keep the persistent volume attached. The proxy refuses to bind
+to a public interface.
 
 If video rendering on the server:
 

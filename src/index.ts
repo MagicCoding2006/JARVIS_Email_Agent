@@ -7,11 +7,13 @@ import { startTelegramBot, stopTelegramBot } from "./chat/telegram.js";
 import { config } from "./config/index.js";
 import { worker, strategist } from "./llm/roles.js";
 import { getSender } from "./services/sender/index.js";
+import { startOAuthHarnessProxy, stopOAuthHarnessProxy } from "./services/openai-oauth-proxy.service.js";
 
 const log = createLogger("main");
 
 async function main() {
   log.info("starting AI SDR system");
+  await startOAuthHarnessProxy();
   log.info(
     `config: dryRun=${config.sending.dryRun} autonomy=${config.agent.autonomy} ` +
       `worker=${worker.configured ? "on" : "OFF"} strategist=${strategist.configured ? "on" : "OFF"} ` +
@@ -27,6 +29,7 @@ async function main() {
     log.info("shutting down…");
     stopTelegramBot();
     for (const t of tasks) t.stop();
+    await stopOAuthHarnessProxy();
     await closeDb();
     process.exit(0);
   };

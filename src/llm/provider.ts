@@ -4,7 +4,7 @@ import { openaiCredentials } from "@openai-oauth/local";
 import { createLogger } from "../lib/logger.js";
 
 export interface LLMRoleConfig {
-  auth: "api-key" | "openai-oauth";
+  auth: "api-key" | "openai-oauth" | "openai-oauth-proxy";
   baseURL: string;
   apiKey: string;
   model: string;
@@ -44,12 +44,15 @@ export class LLMClient {
               typeof OpenAI
             >[0],
           )
-        : new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey || "missing-key" });
+        : new OpenAI({
+            baseURL: cfg.baseURL,
+            apiKey: cfg.auth === "openai-oauth-proxy" ? "openai-oauth" : cfg.apiKey || "missing-key",
+          });
     this.log = createLogger(`llm:${label}`);
   }
 
   get configured(): boolean {
-    if (this.auth === "openai-oauth") return true;
+    if (this.auth === "openai-oauth" || this.auth === "openai-oauth-proxy") return true;
     return Boolean(this.client.apiKey && this.client.apiKey !== "missing-key");
   }
 
@@ -62,7 +65,7 @@ export class LLMClient {
     const res = await this.client.chat.completions.create({
       model: this.model,
       messages,
-      temperature: opts.temperature ?? 0.7,
+      ...this.temperatureParam(opts.temperature ?? 0.7),
       ...this.maxTokenParam(opts.maxTokens ?? DEFAULT_MAX_TOKENS),
     } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
     this.logUsage("complete", res.usage);
@@ -84,7 +87,7 @@ export class LLMClient {
       messages,
       tools: tools.length ? tools : undefined,
       tool_choice: tools.length ? "auto" : undefined,
-      temperature: opts.temperature ?? 0.4,
+      ...this.temperatureParam(opts.temperature ?? 0.4),
       ...this.maxTokenParam(opts.maxTokens ?? DEFAULT_MAX_TOKENS),
     } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
     this.logUsage("chatWithTools", res.usage);
@@ -104,7 +107,7 @@ export class LLMClient {
     const res = await this.client.chat.completions.create({
       model: this.model,
       messages,
-      temperature: opts.temperature ?? 0.4,
+      ...this.temperatureParam(opts.temperature ?? 0.4),
       ...this.maxTokenParam(opts.maxTokens ?? DEFAULT_MAX_TOKENS),
       response_format: { type: "json_object" },
     } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
@@ -116,6 +119,11 @@ export class LLMClient {
   private maxTokenParam(maxTokens: number): { max_tokens: number } | { max_completion_tokens: number } {
     if (this.usesOpenAINewTokenParam()) return { max_completion_tokens: maxTokens };
     return { max_tokens: maxTokens };
+  }
+
+  private temperatureParam(temperature: number): { temperature: number } | Record<string, never> {
+    if (this.auth !== "api-key" && /^gpt-5/i.test(this.model)) return {};
+    return { temperature };
   }
 
   private usesOpenAINewTokenParam(): boolean {

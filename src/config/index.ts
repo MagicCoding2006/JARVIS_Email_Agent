@@ -35,19 +35,26 @@ export const config = {
   },
   llm: {
     worker: {
-      auth: (opt("WORKER_AUTH", "api-key") as "api-key" | "openai-oauth"),
+      auth: (opt("WORKER_AUTH", "api-key") as "api-key" | "openai-oauth" | "openai-oauth-proxy"),
       baseURL: opt("WORKER_BASE_URL", "https://api.openai.com/v1"),
       apiKey: opt("WORKER_API_KEY"),
       model: opt("WORKER_MODEL", "gpt-5.4-mini"),
       oauthFile: opt("WORKER_OAUTH_FILE") || opt("OPENAI_OAUTH_FILE"),
     },
     strategist: {
-      auth: (opt("STRATEGIST_AUTH", "api-key") as "api-key" | "openai-oauth"),
+      auth: (opt("STRATEGIST_AUTH", "api-key") as "api-key" | "openai-oauth" | "openai-oauth-proxy"),
       baseURL: opt("STRATEGIST_BASE_URL", "https://api.z.ai/api/paas/v4"),
       apiKey: opt("STRATEGIST_API_KEY"),
       model: opt("STRATEGIST_MODEL", "glm-5.2"),
       oauthFile: opt("STRATEGIST_OAUTH_FILE") || opt("OPENAI_OAUTH_FILE"),
     },
+  },
+  oauthProxy: {
+    enabled: bool("OPENAI_OAUTH_PROXY_ENABLED", false),
+    host: opt("OPENAI_OAUTH_PROXY_HOST", "127.0.0.1"),
+    port: num("OPENAI_OAUTH_PROXY_PORT", 10531),
+    authFile: opt("OPENAI_OAUTH_FILE", "/data/openai-oauth/auth.json"),
+    authJsonBase64: opt("OPENAI_OAUTH_AUTH_JSON_BASE64"),
   },
   smtp: {
     host: opt("SMTP_HOST", "smtp.gmail.com"),
