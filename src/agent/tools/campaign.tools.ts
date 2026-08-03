@@ -20,14 +20,14 @@ export const listCampaigns: Tool = {
 export const createCampaign: Tool = {
   name: "create_campaign",
   description:
-    "Create a new campaign. Sequence styles: 'cold' (default 7-touch over ~5 weeks), 'nurture' (education-led 7-touch over ~3 weeks), or 'contractor' (7-touch missed-call recovery sequence over ~6 weeks with video offered before linked). Starts in DRAFT until activated. HIGH RISK.",
+    "Create a new campaign. Sequence styles: 'cold' (default 7-touch: intro, bump, proof, new-angle, quick-question, why-now, breakup over ~5 weeks) or 'nurture' (education-led 7-touch: value intro, expand, problem deep-dive, solution framework, differentiation, objection handler, direct offer over ~3 weeks). Starts in DRAFT until activated. HIGH RISK.",
   risk: "high",
   parameters: schema(
     {
       name: { type: "string" },
       offer: { type: "string", description: "The value proposition / what you're selling" },
       persona: { type: "string", description: "Target persona, e.g. 'VP Ops at mid-market healthcare'" },
-      sequenceStyle: { type: "string", enum: ["cold", "nurture"], description: "Sequence style (default 'cold')" },
+      sequenceStyle: { type: "string", enum: ["cold", "nurture", "contractor"], description: "Sequence style (default 'cold')" },
       fromEmail: { type: "string", description: "Optional sending address" },
     },
     ["name", "offer", "persona"],
