@@ -27,7 +27,7 @@ export const createCampaign: Tool = {
       name: { type: "string" },
       offer: { type: "string", description: "The value proposition / what you're selling" },
       persona: { type: "string", description: "Target persona, e.g. 'VP Ops at mid-market healthcare'" },
-      sequenceStyle: { type: "string", enum: ["cold", "nurture", "contractor"], description: "Sequence style (default 'cold')" },
+      sequenceStyle: { type: "string", enum: ["cold", "nurture"], description: "Sequence style (default 'cold')" },
       fromEmail: { type: "string", description: "Optional sending address" },
     },
     ["name", "offer", "persona"],
@@ -36,7 +36,7 @@ export const createCampaign: Tool = {
     name: string;
     offer: string;
     persona: string;
-    sequenceStyle?: "cold" | "nurture";
+    sequenceStyle?: "cold" | "nurture" | "contractor";
     fromEmail?: string;
   }) {
     const existing = await CampaignsRepo.getByName(args.name);
