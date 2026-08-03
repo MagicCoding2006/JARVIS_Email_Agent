@@ -47,7 +47,6 @@ export async function generateStepTemplate(args: {
   const { system, user } = buildTemplateAuthorPrompt(args);
   const res = await worker.completeJSON<{ subjectTemplate?: string; bodyTemplate?: string }>(user, {
     system,
-    temperature: 0.7,
   });
   return {
     subjectTemplate: (res.subjectTemplate ?? "").trim(),
