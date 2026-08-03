@@ -36,7 +36,7 @@ export const createCampaign: Tool = {
     name: string;
     offer: string;
     persona: string;
-    sequenceStyle?: "cold" | "nurture";
+    sequenceStyle?: "cold" | "nurture" | "contractor";
     fromEmail?: string;
   }) {
     const existing = await CampaignsRepo.getByName(args.name);
