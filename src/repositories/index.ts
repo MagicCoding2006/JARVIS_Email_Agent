@@ -152,8 +152,8 @@ export const LeadsRepo = {
     if (enrolledIds.length > 0) {
       filter._id = { $nin: enrolledIds };
     }
-    if (industry?.trim()) {
-      filter.industry = { $regex: industry.trim(), $options: "i" };
+    if (industry) {
+      filter.industry = { $regex: industry, $options: "i" };
     }
     return c.leads.find(filter).sort({ score: -1, createdAt: -1 }).limit(limit).toArray();
   },
