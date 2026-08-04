@@ -670,10 +670,15 @@ OPENAI_OAUTH_PROXY_PORT=10531
 OPENAI_OAUTH_FILE=/data/openai-oauth/auth.json
 OPENAI_OAUTH_AUTH_JSON_BASE64=your-base64-auth-json
 OPENAI_OAUTH_AUTH_SEED_VERSION=2026-08-03-1
+OPENAI_API_DISABLED=true
 
 STRATEGIST_AUTH=openai-oauth-proxy
 STRATEGIST_BASE_URL=http://127.0.0.1:10531/v1
 STRATEGIST_MODEL=gpt-5.5
+
+WORKER_AUTH=openai-oauth-proxy
+WORKER_BASE_URL=http://127.0.0.1:10531/v1
+WORKER_MODEL=gpt-5.4-mini
 AGENT_DAILY_MODE=autonomous
 AGENT_AUTONOMY=semi
 AGENT_MAX_STEPS=12
@@ -692,6 +697,9 @@ that value in Git or `.env.example`; it grants access to the ChatGPT account.
 Set `OPENAI_OAUTH_AUTH_SEED_VERSION` to a new unique value whenever you replace
 the base64 credential. This makes Railway overwrite a stale token on the Volume
 once without replacing later token refreshes on every deploy.
+Set `OPENAI_API_DISABLED=true` to make accidental `api.openai.com` API-key
+routing a startup error instead of a billable fallback. In Telegram, `/llm`
+shows the active strategist and worker routes without exposing credentials.
 The harness is unofficial and ChatGPT account limits still apply, so monitor its
 startup logs and keep the persistent volume attached. The proxy refuses to bind
 to a public interface.

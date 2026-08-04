@@ -9,6 +9,7 @@ export interface LLMRoleConfig {
   apiKey: string;
   model: string;
   oauthFile?: string;
+  disableOfficialOpenAI?: boolean;
 }
 
 export interface CompleteOptions {
@@ -26,6 +27,14 @@ const DEFAULT_MAX_TOKENS = 10_000;
  * way we authenticate, so the check is on the model name alone.
  */
 const DEFAULT_TEMPERATURE_ONLY = /^(gpt-5|o1|o3|o4)([.\-]|$)/i;
+
+function endpointHost(baseURL: string): string {
+  try {
+    return new URL(baseURL).host;
+  } catch {
+    return baseURL;
+  }
+}
 
 /** True when the provider rejected the request specifically over `temperature`. */
 function isUnsupportedTemperatureError(err: unknown): boolean {
@@ -51,6 +60,11 @@ export class LLMClient {
   private temperatureRejected = false;
 
   constructor(label: string, cfg: LLMRoleConfig) {
+    if (cfg.disableOfficialOpenAI && cfg.auth === "api-key" && endpointHost(cfg.baseURL) === "api.openai.com") {
+      throw new Error(
+        `${label} is configured for api.openai.com while OPENAI_API_DISABLED=true; route it through openai-oauth-proxy`,
+      );
+    }
     this.label = label;
     this.auth = cfg.auth;
     this.baseURL = cfg.auth === "openai-oauth" ? "openai-oauth" : cfg.baseURL;
@@ -72,6 +86,13 @@ export class LLMClient {
   get configured(): boolean {
     if (this.auth === "openai-oauth" || this.auth === "openai-oauth-proxy") return true;
     return Boolean(this.client.apiKey && this.client.apiKey !== "missing-key");
+  }
+
+  /** Safe runtime description for logs/Telegram; never includes credentials. */
+  get route(): string {
+    if (this.auth === "openai-oauth-proxy") return `${this.model} via ChatGPT OAuth harness (${endpointHost(this.baseURL)})`;
+    if (this.auth === "openai-oauth") return `${this.model} via ChatGPT OAuth file`;
+    return `${this.model} via API key (${endpointHost(this.baseURL)})`;
   }
 
   /** Plain text completion. */

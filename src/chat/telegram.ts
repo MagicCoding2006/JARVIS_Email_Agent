@@ -4,6 +4,7 @@ import { getUpdates, sendMessage, answerCallbackQuery, type TelegramUpdate } fro
 import { handleChat, resetChat } from "../agent/agent.js";
 import { executeApproval, denyApproval, formatApprovalMessage } from "../agent/approvals.js";
 import { ApprovalsRepo } from "../repositories/index.js";
+import { strategist, worker } from "../llm/roles.js";
 
 const log = createLogger("telegram-bot");
 
@@ -103,7 +104,11 @@ async function handleUpdate(u: TelegramUpdate): Promise<void> {
     return;
   }
   if (text === "/start") {
-    await sendMessage("Hi! I run your outbound. Ask me anything (e.g. \"how are we doing this week?\") or tell me what to do.", { chatId });
+    await sendMessage("Hi! I run your outbound. Ask me anything (e.g. \"how are we doing this week?\") or tell me what to do. Use /llm to verify model routing.", { chatId });
+    return;
+  }
+  if (text === "/llm") {
+    await sendMessage(`Strategist/chat: ${strategist.route}\nWorker/email generation: ${worker.route}`, { chatId });
     return;
   }
   if (text === "/pending") {

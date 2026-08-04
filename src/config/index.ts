@@ -40,6 +40,7 @@ export const config = {
       apiKey: opt("WORKER_API_KEY"),
       model: opt("WORKER_MODEL", "gpt-5.4-mini"),
       oauthFile: opt("WORKER_OAUTH_FILE") || opt("OPENAI_OAUTH_FILE"),
+      disableOfficialOpenAI: bool("OPENAI_API_DISABLED", false),
     },
     strategist: {
       auth: (opt("STRATEGIST_AUTH", "api-key") as "api-key" | "openai-oauth" | "openai-oauth-proxy"),
@@ -47,6 +48,7 @@ export const config = {
       apiKey: opt("STRATEGIST_API_KEY"),
       model: opt("STRATEGIST_MODEL", "glm-5.2"),
       oauthFile: opt("STRATEGIST_OAUTH_FILE") || opt("OPENAI_OAUTH_FILE"),
+      disableOfficialOpenAI: bool("OPENAI_API_DISABLED", false),
     },
   },
   oauthProxy: {

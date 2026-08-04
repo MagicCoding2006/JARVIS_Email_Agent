@@ -14,7 +14,7 @@ async function main() {
   log.info("starting AI SDR system");
   log.info(
     `config: dryRun=${config.sending.dryRun} autonomy=${config.agent.autonomy} ` +
-      `worker=${worker.configured ? "on" : "OFF"} strategist=${strategist.configured ? "on" : "OFF"} ` +
+      `worker=${worker.configured ? worker.route : "OFF"} strategist=${strategist.configured ? strategist.route : "OFF"} ` +
       `sender=${getSender().name}`,
   );
 
