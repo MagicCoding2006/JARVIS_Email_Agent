@@ -1,7 +1,14 @@
 import { config } from "../config/index.js";
 import { createLogger } from "../lib/logger.js";
 import { nowInWindow, startOfDay } from "../lib/time.js";
-import { EnrollmentsRepo, EventsRepo, LeadsRepo, MessagesRepo } from "../repositories/index.js";
+import {
+  CampaignsRepo,
+  EnrollmentsRepo,
+  EventsRepo,
+  LeadsRepo,
+  MessagesRepo,
+} from "../repositories/index.js";
+import { dispositionForCampaignStatus } from "../services/campaign-control.service.js";
 import { getSender } from "../services/sender/index.js";
 import {
   allCapacities,
@@ -14,7 +21,7 @@ import { trackingUrls } from "../services/tracking.service.js";
 import { checkSendingHealth, type SendingHealth } from "../services/sending-health.service.js";
 import { getSendPace } from "../services/send-pace.service.js";
 import { notify } from "../services/notifications.service.js";
-import type { Lead, Message } from "../models/types.js";
+import type { Campaign, Lead, Message } from "../models/types.js";
 
 const log = createLogger("dispatcher");
 
@@ -59,8 +66,19 @@ export interface DispatchResult {
   sent: number;
   skipped: number;
   failed: number;
-  /** Due messages held back because their mailbox hit its warmup/daily cap. */
+  /** Due messages left scheduled — mailbox/domain at cap, or campaign paused. */
   deferred: number;
+}
+
+/**
+ * Per-run campaign cache. A dispatch batch is mostly one or two campaigns, so
+ * this keeps the safety guard to a single lookup each instead of one per message.
+ */
+type CampaignCache = Map<string, Campaign | null>;
+
+async function loadCampaign(cache: CampaignCache, id: string): Promise<Campaign | null> {
+  if (!cache.has(id)) cache.set(id, await CampaignsRepo.getById(id));
+  return cache.get(id) ?? null;
 }
 
 /**
@@ -134,6 +152,8 @@ export async function dispatchDue(opts: DispatchOptions = {}): Promise<DispatchR
     return domainRemaining.get(domain)!;
   }
 
+  const campaignCache: CampaignCache = new Map();
+
   for (const msg of due) {
     if (sent >= batchSize) break;
 
@@ -152,7 +172,11 @@ export async function dispatchDue(opts: DispatchOptions = {}): Promise<DispatchR
       }
     }
 
-    const ok = await sendOne(msg);
+    const ok = await sendOne(msg, campaignCache);
+    if (ok === "deferred") {
+      deferred++; // campaign paused — leave it queued for when it resumes
+      continue;
+    }
     if (ok === "sent") {
       sent++;
       if (!dryRun) {
@@ -171,12 +195,31 @@ export async function dispatchDue(opts: DispatchOptions = {}): Promise<DispatchR
   }
 
   log.info(
-    `dispatch complete: ${sent} sent, ${skipped} skipped, ${failed} failed, ${deferred} deferred (cap)`,
+    `dispatch complete: ${sent} sent, ${skipped} skipped, ${failed} failed, ${deferred} deferred (cap/paused)`,
   );
   return { sent, skipped, failed, deferred };
 }
 
-async function sendOne(msg: Message): Promise<"sent" | "skipped" | "failed"> {
+async function sendOne(
+  msg: Message,
+  campaignCache: CampaignCache,
+): Promise<"sent" | "skipped" | "failed" | "deferred"> {
+  // Safety guard: a campaign that isn't active must never put mail on the wire,
+  // however many touches are still queued against it. Archived/draft campaigns
+  // (and deleted ones) drop their queue; paused ones keep it for the resume.
+  const campaign = await loadCampaign(campaignCache, msg.campaignId);
+  const disposition = dispositionForCampaignStatus(campaign?.status);
+  if (disposition === "hold") {
+    log.debug(`holding step ${msg.step} to ${msg.toEmail} — campaign "${campaign?.name}" is paused`);
+    return "deferred";
+  }
+  if (disposition === "drop") {
+    const state = campaign ? campaign.status : "deleted";
+    await MessagesRepo.setStatus(msg._id, "skipped", { failedReason: `campaign ${state}` });
+    log.warn(`skipped step ${msg.step} to ${msg.toEmail} — campaign ${state}`);
+    return "skipped";
+  }
+
   // Re-validate the enrollment + lead are still active/contactable.
   const enrollment = await EnrollmentsRepo.getById(msg.enrollmentId);
   if (!enrollment || enrollment.status !== "active") {

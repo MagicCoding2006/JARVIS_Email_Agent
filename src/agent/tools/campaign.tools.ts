@@ -4,6 +4,7 @@ import { DEFAULT_SEQUENCE } from "../../services/sequences/default-sequence.js";
 import { NURTURE_SEQUENCE } from "../../services/sequences/nurture-sequence.js";
 import { enrollLead } from "../../services/sequencer.service.js";
 import { ensureCampaign } from "../../services/variants.service.js";
+import { cancelCampaignEnrollments } from "../../services/campaign-control.service.js";
 import type { LeadStatus } from "../../models/types.js";
 
 export const listCampaigns: Tool = {
@@ -70,6 +71,40 @@ export const setCampaignStatus: Tool = {
     if (!c) return { error: `campaign not found: ${args.campaign}` };
     await CampaignsRepo.setStatus(c._id, args.status);
     return { id: c._id, name: c.name, status: args.status };
+  },
+};
+
+export const cancelCampaignEnrollmentsTool: Tool = {
+  name: "cancel_campaign_enrollments",
+  description:
+    "Stop a campaign from sending anything further: mark its in-flight enrollments stopped and cancel every follow-up still queued for them. Use this after pausing or archiving a campaign whose queued touches are still going out. Terminal enrollments (replied, converted, completed, stopped) are never touched. Run with dryRun:true first to preview the blast radius — a dry run is read-only and needs no approval. HIGH RISK when it writes.",
+  risk: "high",
+  // A preview writes nothing, so don't make the human approve looking.
+  riskFor: (args: { dryRun?: boolean }) => (args?.dryRun === true ? "low" : "high"),
+  parameters: schema(
+    {
+      campaign: { type: "string", description: "Campaign name or id" },
+      statusFilter: {
+        type: "string",
+        enum: ["active", "all"],
+        description:
+          "'active' (default) cancels only active enrollments; 'all' also cancels paused ones",
+      },
+      cancelDueMessages: {
+        type: "boolean",
+        description: "Also cancel the queued messages themselves (default true)",
+      },
+      dryRun: { type: "boolean", description: "Preview counts without writing anything" },
+    },
+    ["campaign"],
+  ),
+  async run(args: {
+    campaign: string;
+    statusFilter?: "active" | "all";
+    cancelDueMessages?: boolean;
+    dryRun?: boolean;
+  }) {
+    return cancelCampaignEnrollments(args);
   },
 };
 

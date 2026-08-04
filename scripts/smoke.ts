@@ -2,8 +2,9 @@
 import { DEFAULT_SEQUENCE } from "../src/services/sequences/default-sequence.js";
 import { scheduleFromAnchor } from "../src/lib/time.js";
 import { buildTrackedContent } from "../src/services/tracking.service.js";
-import { parseJSONLoose } from "../src/llm/provider.js";
+import { parseJSONLoose, LLMClient } from "../src/llm/provider.js";
 import { variantScore } from "../src/services/variants.service.js";
+import { dispositionForCampaignStatus } from "../src/services/campaign-control.service.js";
 import type { Lead } from "../src/models/types.js";
 
 let failures = 0;
@@ -55,6 +56,26 @@ const zero = { sent: 0, opens: 0, clicks: 0, replies: 0, positiveReplies: 0, mee
 const opener = { ...zero, sent: 100, opens: 60 };
 const replier = { ...zero, sent: 100, opens: 40, replies: 8, positiveReplies: 4, meetings: 2 };
 assert(variantScore(replier) > variantScore(opener), "variant with replies+meetings outscores opens-only");
+
+// 5) Dispatch safety guard — only an active campaign may put mail on the wire.
+console.log("\n— campaign send guard —");
+assert(dispositionForCampaignStatus("active") === "send", "active campaign sends");
+assert(dispositionForCampaignStatus("paused") === "hold", "paused campaign holds its queue");
+assert(dispositionForCampaignStatus("archived") === "drop", "archived campaign drops queued touches");
+assert(dispositionForCampaignStatus("draft") === "drop", "draft campaign drops queued touches");
+assert(dispositionForCampaignStatus(undefined) === "drop", "deleted campaign drops queued touches");
+
+// 6) Temperature gating — reasoning models take only the default, whatever the auth.
+console.log("\n— temperature gating —");
+const sendsTemperature = (model: string) =>
+  new LLMClient("t", { auth: "api-key", baseURL: "http://127.0.0.1:1/v1", apiKey: "k", model })
+    .supportsCustomTemperature();
+for (const m of ["gpt-5.5", "gpt-5.4-mini", "o1-preview", "o3-mini"]) {
+  assert(!sendsTemperature(m), `${m} omits temperature`);
+}
+for (const m of ["glm-5.2", "gpt-4o-mini"]) {
+  assert(sendsTemperature(m), `${m} keeps its custom temperature`);
+}
 
 console.log(`\n${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);
 process.exit(failures === 0 ? 0 : 1);

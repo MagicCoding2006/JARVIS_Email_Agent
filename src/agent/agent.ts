@@ -3,7 +3,7 @@ import { config } from "../config/index.js";
 import { strategist } from "../llm/roles.js";
 import { createLogger } from "../lib/logger.js";
 import { allTools, getTool } from "./tools/index.js";
-import { toOpenAITool, type ToolContext } from "./tools/types.js";
+import { riskOf, toOpenAITool, type ToolContext } from "./tools/types.js";
 import { needsApproval } from "./autonomy.js";
 import { requestApproval } from "./approvals.js";
 import { PlaybookRepo } from "../repositories/index.js";
@@ -120,7 +120,7 @@ export async function runAgent(messages: Msg[], source: ToolContext["source"], a
         result = { error: `unknown tool ${call.function.name}` };
       } else {
         const args = safeParseArgs(call.function.arguments);
-        if (needsApproval(tool.risk)) {
+        if (needsApproval(riskOf(tool, args))) {
           const summary = `${tool.name} ${call.function.arguments ?? "{}"}`;
           const a = await requestApproval(tool.name, args, summary, approvalChatId);
           result = {
