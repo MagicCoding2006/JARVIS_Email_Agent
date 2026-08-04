@@ -13,6 +13,7 @@ import {
 import { DEFAULT_SEQUENCE } from "../services/sequences/default-sequence.js";
 import { NURTURE_SEQUENCE } from "../services/sequences/nurture-sequence.js";
 import { enrollLead } from "../services/sequencer.service.js";
+import { cancelCampaignEnrollments } from "../services/campaign-control.service.js";
 import { dispatchDue } from "../workers/dispatcher.js";
 import { processEvents } from "../workers/event-processor.js";
 import { runDailyCycle } from "../workers/daily-cycle.js";
@@ -180,6 +181,30 @@ async function cmdActivateCampaign(p: Parsed) {
   if (!c) throw new Error(`campaign not found: ${ref}`);
   await CampaignsRepo.setStatus(c._id, "active");
   log.info(`activated "${c.name}"`);
+}
+
+async function cmdCancelEnrollments(p: Parsed) {
+  const ref = p._[0] || str(p.flags.campaign);
+  if (!ref) throw new Error("usage: cli cancel-enrollments <name|id> [--yes] [--all] [--keep-messages]");
+  // Preview unless --yes is explicit. `npm run cli` swallows a trailing
+  // --dry-run as npm's own flag, so a safe default is the only reliable guard.
+  const dryRun = !p.flags.yes;
+  const res = await cancelCampaignEnrollments({
+    campaign: ref,
+    statusFilter: p.flags.all ? "all" : "active",
+    cancelDueMessages: !p.flags["keep-messages"],
+    dryRun,
+  });
+  if ("error" in res) {
+    throw new Error(
+      `${res.error}${res.candidates?.length ? `\nknown campaigns:\n  ${res.candidates.join("\n  ")}` : ""}`,
+    );
+  }
+  log.info(
+    `${res.dryRun ? "[dry run] would cancel" : "cancelled"} ${res.cancelledEnrollments}/${res.matchedEnrollments} enrollment(s) ` +
+      `and ${res.cancelledScheduledMessages} queued message(s) for "${res.campaign}" (campaign is ${res.campaignStatus})`,
+  );
+  if (res.dryRun) log.info("nothing was written — re-run with --yes to apply");
 }
 
 async function cmdEnroll(p: Parsed) {
@@ -633,6 +658,7 @@ const HELP = `AI SDR CLI
   list-campaigns
   activate-campaign <name|id>
   enroll --campaign <name|id> [--status new] [--limit 50] [--lead <email>]
+  cancel-enrollments <name|id> [--yes] [--all] [--keep-messages]   stop a campaign's in-flight enrollments + queued follow-ups (previews unless --yes)
   dispatch [--ignore-window]    send due messages now
   rebalance-mailbox --to <mailbox> [--from <mailbox>] [--limit 5]   move safe queued first-touch sends
   llm-smoke [--role worker|strategist] [--prompt "..."]   test LLM auth/config
@@ -683,6 +709,7 @@ async function run() {
     case "list-campaigns": await cmdListCampaigns(); break;
     case "activate-campaign": await cmdActivateCampaign(p); break;
     case "enroll": await cmdEnroll(p); break;
+    case "cancel-enrollments": await cmdCancelEnrollments(p); break;
     case "dispatch": await cmdDispatch(p); break;
     case "rebalance-mailbox": await cmdRebalanceMailbox(p); break;
     case "llm-smoke": await cmdLlmSmoke(p); break;

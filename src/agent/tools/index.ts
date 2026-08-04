@@ -1,6 +1,13 @@
 import type { Tool } from "./types.js";
 import { getMetrics, getPipelineStatus, getBreakdowns } from "./metrics.tools.js";
-import { listCampaigns, createCampaign, setCampaignStatus, changeOffer, enrollLeads } from "./campaign.tools.js";
+import {
+  listCampaigns,
+  createCampaign,
+  setCampaignStatus,
+  changeOffer,
+  enrollLeads,
+  cancelCampaignEnrollmentsTool,
+} from "./campaign.tools.js";
 import { genVariants, listVariants, prune } from "./variant.tools.js";
 import { evaluateExperiments, listHypotheses } from "./experiment.tools.js";
 import { draftStepTemplate, setStepTemplate } from "./template.tools.js";
@@ -61,6 +68,7 @@ const TOOLS: Tool[] = [
   proposeCodeChange,
   createCampaign,
   setCampaignStatus,
+  cancelCampaignEnrollmentsTool,
   changeOffer,
   setStepTemplate,
   enrollLeads,

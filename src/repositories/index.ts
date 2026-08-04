@@ -319,6 +319,25 @@ export const EnrollmentsRepo = {
     );
     return res.modifiedCount;
   },
+
+  /** Enrollments in a campaign, optionally narrowed to specific statuses. */
+  async listForCampaign(campaignId: string, statuses?: EnrollmentStatus[]): Promise<Enrollment[]> {
+    const c = await getCollections();
+    const filter: Record<string, unknown> = { campaignId };
+    if (statuses?.length) filter.status = { $in: statuses };
+    return c.enrollments.find(filter).toArray();
+  },
+
+  /** Bulk-stop specific enrollments (campaign teardown). Returns rows changed. */
+  async stopMany(ids: string[], status: EnrollmentStatus, reason: string): Promise<number> {
+    if (!ids.length) return 0;
+    const c = await getCollections();
+    const res = await c.enrollments.updateMany(
+      { _id: { $in: ids } },
+      { $set: { status, stopReason: reason, updatedAt: now() } },
+    );
+    return res.modifiedCount;
+  },
 };
 
 // ── Messages ─────────────────────────────────────────────────────────────────
@@ -417,6 +436,26 @@ export const MessagesRepo = {
     const c = await getCollections();
     const res = await c.messages.updateMany(
       { enrollmentId, status: "scheduled" },
+      { $set: { status: "canceled", updatedAt: now() } },
+    );
+    return res.modifiedCount;
+  },
+
+  /** How many touches are still queued for a campaign (dry-run preview). */
+  async countScheduledForCampaign(campaignId: string): Promise<number> {
+    const c = await getCollections();
+    return c.messages.countDocuments({ campaignId, status: "scheduled" });
+  },
+
+  /**
+   * Cancel every queued touch for a campaign. Campaign-scoped rather than
+   * enrollment-scoped on purpose: a stopped enrollment can still be carrying
+   * orphaned `scheduled` messages, and those are exactly what needs purging.
+   */
+  async cancelScheduledForCampaign(campaignId: string): Promise<number> {
+    const c = await getCollections();
+    const res = await c.messages.updateMany(
+      { campaignId, status: "scheduled" },
       { $set: { status: "canceled", updatedAt: now() } },
     );
     return res.modifiedCount;

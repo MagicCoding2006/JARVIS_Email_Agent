@@ -59,7 +59,7 @@ npm run cli <command> [flags]     # operator CLI (see `npm run cli` for full lis
 MONGODB_URI=mongodb://dummy TRACKING_BASE_URL=http://localhost:8787 npx tsx scripts/smoke.ts
 ```
 
-Key CLI verbs: `import-leads`, `create-campaign`, `enroll`, `dispatch`,
+Key CLI verbs: `import-leads`, `create-campaign`, `enroll`, `cancel-enrollments`, `dispatch`,
 `process-events`, `daily-cycle`, `weekly-review`, `monthly-review`,
 `gen-variants`, `list-variants`, `make-pixel`, `video-script`, `produce-video`,
 `chat`, `agent-cycle`, `discover-leads`, `discover-businesses`,
@@ -108,7 +108,12 @@ Full layer-by-layer status and the data model are in [ARCHITECTURE.md](./ARCHITE
    degrade to empty when the worker is off. See `examples/templated-sequence.json`;
    load via `create-campaign --sequence-file`.
 2. `dispatcher` (cron /5m) sends due messages within the window + caps, records
-   `sent`, advances the enrollment, schedules the next step.
+   `sent`, advances the enrollment, schedules the next step. A message only goes
+   out if its campaign is **active** (`campaign-control.service.ts`): a `paused`
+   campaign holds its queue for the resume, and `draft`/`archived`/deleted ones
+   mark queued touches `skipped` so they can never send. To purge a stopped
+   campaign's queue outright, use `cancel-enrollments` / the agent's
+   `cancel_campaign_enrollments` tool (`--dry-run` previews the blast radius).
 3. Prospect opens/clicks/replies/books → the **tracking server** writes `events`.
 4. `event-processor` (cron /10m) scores events, rolls stats into A/B `variants`,
    escalates hot leads, and stops the sequence on reply/unsubscribe/bounce/booked.
