@@ -53,7 +53,11 @@ npm install
 npm run typecheck                 # tsc --noEmit (run after any change)
 npm start                         # tracking server + all cron jobs
 npm run tracking-server           # just the Express tracking server
-npm run cli <command> [flags]     # operator CLI (see `npm run cli` for full list)
+npm run cli -- <command> [flags]  # operator CLI (see `npm run cli` for full list)
+# NOTE the `--`: npm swallows any bare `--flag` after the script name as its own
+# config, so `npm run cli dispatch --ignore-window` silently drops the flag.
+# Destructive verbs must therefore never rely on an opt-in flag for safety —
+# `cancel-enrollments` previews unless you pass `--yes` for this reason.
 
 # pure-logic smoke test (no DB/network):
 MONGODB_URI=mongodb://dummy TRACKING_BASE_URL=http://localhost:8787 npx tsx scripts/smoke.ts
