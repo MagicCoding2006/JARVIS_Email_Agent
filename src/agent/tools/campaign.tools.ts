@@ -1,5 +1,5 @@
 import { schema, type Tool } from "./types.js";
-import { CampaignsRepo, LeadsRepo } from "../../repositories/index.js";
+import { CampaignsRepo, EnrollmentsRepo, LeadsRepo } from "../../repositories/index.js";
 import { DEFAULT_SEQUENCE } from "../../services/sequences/default-sequence.js";
 import { NURTURE_SEQUENCE } from "../../services/sequences/nurture-sequence.js";
 import { enrollLead } from "../../services/sequencer.service.js";
