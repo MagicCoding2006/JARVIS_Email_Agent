@@ -1,5 +1,5 @@
 import type { Tool } from "./types.js";
-import { getMetrics, getPipelineStatus, getBreakdowns } from "./metrics.tools.js";
+import { getMetrics, getPipelineStatus, getBreakdowns, getCampaignLeadIndustrySplit } from "./metrics.tools.js";
 import {
   listCampaigns,
   createCampaign,
