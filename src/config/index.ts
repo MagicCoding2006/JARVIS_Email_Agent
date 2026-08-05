@@ -55,7 +55,7 @@ export const config = {
     enabled: bool("OPENAI_OAUTH_PROXY_ENABLED", false),
     host: opt("OPENAI_OAUTH_PROXY_HOST", "127.0.0.1"),
     port: num("OPENAI_OAUTH_PROXY_PORT", 10531),
-    authFile: opt("OPENAI_OAUTH_FILE", "/data/openai-oauth/auth.json"),
+    authFile: opt("OPENAI_OAUTH_FILE", "/app/data/openai-oauth/auth.json"),
     authJsonBase64: opt("OPENAI_OAUTH_AUTH_JSON_BASE64"),
     authSeedVersion: opt("OPENAI_OAUTH_AUTH_SEED_VERSION"),
   },

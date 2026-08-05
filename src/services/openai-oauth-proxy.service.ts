@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { startOpenAIOAuthServer, type RunningOpenAIOAuthServer } from "openai-oauth";
@@ -42,19 +43,25 @@ async function readOptionalText(path: string): Promise<string> {
   }
 }
 
+function requestedSeedMarker(): string {
+  if (!config.oauthProxy.authJsonBase64) return config.oauthProxy.authSeedVersion;
+  const fingerprint = createHash("sha256").update(config.oauthProxy.authJsonBase64).digest("hex");
+  return `${config.oauthProxy.authSeedVersion || "auto"}:sha256:${fingerprint}`;
+}
+
 async function ensureAuthFile(): Promise<void> {
   const path = config.oauthProxy.authFile;
   const markerPath = `${path}.seed-version`;
-  const requestedVersion = config.oauthProxy.authSeedVersion;
+  const requestedMarker = requestedSeedMarker();
 
-  // A changed seed version intentionally replaces a stale persisted token once.
+  // A changed credential fingerprint replaces a stale persisted token once.
   // The marker then prevents later deploys from overwriting refreshed tokens.
-  if (requestedVersion && (await readOptionalText(markerPath)) !== requestedVersion) {
+  if (requestedMarker && (await readOptionalText(markerPath)) !== requestedMarker) {
     const decoded = decodeAuthJson();
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await writeFile(path, decoded, { encoding: "utf8", mode: 0o600 });
-    await writeFile(markerPath, `${requestedVersion}\n`, { encoding: "utf8", mode: 0o600 });
-    log.info(`reseeded OAuth credentials at ${path} (version ${requestedVersion})`);
+    await writeFile(markerPath, `${requestedMarker}\n`, { encoding: "utf8", mode: 0o600 });
+    log.info(`reseeded OAuth credentials at ${path} (credential fingerprint changed)`);
     return;
   }
 

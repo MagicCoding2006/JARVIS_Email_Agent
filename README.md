@@ -225,7 +225,9 @@ Behavior:
 - Under `AGENT_AUTONOMY=semi`, low-risk tools run automatically and high-risk actions require approval.
 - Set `AGENT_AUTONOMOUS_CODE=true` only if scheduled cycles should inspect
   `AGENT_CODE_REPO` and prepare approval-gated self-improvement PRs. The agent
-  never merges or deploys its own changes.
+  opens these as drafts and never merges or deploys its own changes.
+- Bot-generated code PRs run the same TypeScript and test checks used before a
+  Railway deploy. Do not mark a draft ready until its `Build and test` check is green.
 
 Useful commands in Telegram:
 
@@ -660,16 +662,21 @@ For Railway:
 - Keep only one running Telegram poller for a bot token. If local and Railway both run, one can consume updates before the other.
 - Do not commit `.env`.
 
+Protect `main` in GitHub so broken bot PRs cannot trigger Railway: open
+**Settings -> Rules -> Rulesets**, add a branch ruleset for `main`, require a
+pull request, and require the `Build and test` status check. Railway should
+continue deploying only `main`. The workflow in `.github/workflows/ci.yml`
+runs on every PR and push; `npm run verify` runs the same checks locally.
+
 To run the authenticated ChatGPT harness inside the Railway service without an
-OpenAI API key, add a persistent Railway Volume mounted at `/data`, then set:
+OpenAI API key, add a persistent Railway Volume mounted at `/app/data`, then set:
 
 ```env
 OPENAI_OAUTH_PROXY_ENABLED=true
 OPENAI_OAUTH_PROXY_HOST=127.0.0.1
 OPENAI_OAUTH_PROXY_PORT=10531
-OPENAI_OAUTH_FILE=/data/openai-oauth/auth.json
+OPENAI_OAUTH_FILE=/app/data/openai-oauth/auth.json
 OPENAI_OAUTH_AUTH_JSON_BASE64=your-base64-auth-json
-OPENAI_OAUTH_AUTH_SEED_VERSION=2026-08-03-1
 OPENAI_API_DISABLED=true
 
 STRATEGIST_AUTH=openai-oauth-proxy
@@ -685,18 +692,32 @@ AGENT_MAX_STEPS=12
 AGENT_AUTONOMOUS_CODE=false
 ```
 
-On this Mac, copy the already-authenticated file into the Railway variable
-without printing it:
+Create a dedicated Railway-only credential so local Codex token refreshes cannot
+invalidate the hosted session:
 
 ```bash
-base64 < /Users/alexlotkov/.codex/auth.json | tr -d '\n' | pbcopy
+npx openai-oauth login --oauth-file /tmp/railway-openai-auth.json
+base64 < /tmp/railway-openai-auth.json | tr -d '\n' | pbcopy
 ```
 
 Paste the clipboard into Railway as `OPENAI_OAUTH_AUTH_JSON_BASE64`. Never put
 that value in Git or `.env.example`; it grants access to the ChatGPT account.
-Set `OPENAI_OAUTH_AUTH_SEED_VERSION` to a new unique value whenever you replace
-the base64 credential. This makes Railway overwrite a stale token on the Volume
-once without replacing later token refreshes on every deploy.
+The app fingerprints this secret: replacing it automatically overwrites a stale
+Volume token once, while normal deploys preserve the harness's refreshed token.
+Do not run a local proxy with `/tmp/railway-openai-auth.json`.
+
+After authenticating the Railway CLI once (`npx @railway/cli login`) and linking
+this directory to the project, the complete recovery flow is one command:
+
+```bash
+npm run oauth:railway
+```
+
+It opens ChatGPT sign-in, creates an isolated temporary credential, sends it to
+the `jarvis-sdr` production service over stdin (so it is not exposed in command
+arguments), fixes the persistent auth path, triggers a deploy, and deletes the
+temporary local file. Override the target with `RAILWAY_OAUTH_SERVICE` or
+`RAILWAY_OAUTH_ENVIRONMENT` only if the Railway names change.
 Set `OPENAI_API_DISABLED=true` to make accidental `api.openai.com` API-key
 routing a startup error instead of a billable fallback. In Telegram, `/llm`
 shows the active strategist and worker routes without exposing credentials.

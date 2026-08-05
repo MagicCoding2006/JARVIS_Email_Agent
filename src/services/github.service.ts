@@ -130,8 +130,9 @@ export async function proposeCodeChanges(args: {
     title: args.title,
     description: args.description,
     branchSlug: "code-tools",
+    draft: true,
     footer:
-      "_Proposed by the SDR agent as a self-improvement PR. Review carefully, run tests, and merge only if it is correct._",
+      "_Proposed by the SDR agent as a draft self-improvement PR. Mark it ready only after the Build and test check passes._",
   });
 }
 
@@ -142,6 +143,7 @@ async function proposeChanges(
     title: string;
     description: string;
     branchSlug: string;
+    draft?: boolean;
     footer: string;
   },
 ): Promise<{ prUrl: string; branch: string }> {
@@ -185,6 +187,7 @@ async function proposeChanges(
       title: args.title,
       head: branch,
       base,
+      draft: args.draft ?? false,
       body:
         `${args.description}\n\nChanged files:\n${args.changes.map((c) => `- \`${c.path}\``).join("\n")}` +
         `\n\n${args.footer}`,

@@ -51,12 +51,16 @@ export const proposeCodeChange: Tool = {
   name: "propose_code_change",
   description:
     "Open a GitHub pull request against the agent's code repo. Use for small, reviewable self-improvements such as adding a missing tool. " +
-    "Prefer find/replace changes. Only use full newContent for new files or small files read in full. This never merges or deploys.",
+    "The PR must be self-contained: inspect and update every affected import, export, registration, type, caller, and focused test in the same PR. " +
+    "Prefer find/replace changes. Only use full newContent for new files or small files read in full. The PR opens as a draft and must pass CI; this never merges or deploys.",
   risk: "high",
   parameters: schema(
     {
       title: { type: "string", description: "PR title" },
-      description: { type: "string", description: "Why this code change is needed and how the operator should verify it" },
+      description: {
+        type: "string",
+        description: "Why this code change is needed, related call sites checked, and the tests/build checks that should pass",
+      },
       changes: {
         type: "array",
         minItems: 1,
@@ -121,7 +125,7 @@ export const proposeCodeChange: Tool = {
     return {
       prUrl,
       branch,
-      note: "Code PR opened. It does not merge or deploy until the operator reviews it.",
+      note: "Draft code PR opened. Wait for the Build and test check to pass, then mark it ready and merge it.",
     };
   },
 };
