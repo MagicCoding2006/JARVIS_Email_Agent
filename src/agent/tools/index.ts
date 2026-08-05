@@ -36,6 +36,7 @@ const TOOLS: Tool[] = [
   getMetrics,
   getPipelineStatus,
   getBreakdowns,
+  getCampaignLeadIndustrySplit,
   listCampaigns,
   listVariants,
   listHypotheses,
