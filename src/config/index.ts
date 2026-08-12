@@ -238,8 +238,27 @@ export const config = {
     // can't be waited out (resets at midnight PT) → enable billing for volume.
     ttsMaxRetries: num("GEMINI_TTS_MAX_RETRIES", 4),
   },
+  tts: {
+    // Voice replies in Telegram. "kokoro" = free, local, CPU-only (no API key,
+    // no system binary beyond ffmpeg); "off" hides the 🔊 button entirely.
+    // Unrelated to gemini.* above, which is only used for video voiceover.
+    provider: opt("TTS_PROVIDER", "kokoro"),
+    model: opt("TTS_MODEL", "onnx-community/Kokoro-82M-v1.0-ONNX"),
+    // Voice id from the Kokoro set (af_*/am_* US, bf_*/bm_* UK).
+    voice: opt("TTS_VOICE", "af_heart"),
+    // q8 keeps the weights ~90MB and RSS under ~500MB. fp32 sounds marginally
+    // better and roughly triples both — not worth it on a small container.
+    dtype: opt("TTS_DTYPE", "q8"),
+    // Synthesis runs about 1.5x realtime on a shared vCPU, so cap input length:
+    // this bounds one tap to well under a minute of compute.
+    maxChars: num("TTS_MAX_CHARS", 900),
+  },
   video: {
     outputDir: opt("VIDEO_OUTPUT_DIR", "data/videos"),
+    // Days to keep rendered videos before the nightly prune removes them. These
+    // files are streamed by prospects from the tracking server, so this window
+    // must outlast how long a cold lead takes to open the email. 0 = keep forever.
+    retentionDays: num("VIDEO_RETENTION_DAYS", 30),
     enableRemotion: bool("VIDEO_ENABLE_REMOTION", false),
     captureWebsite: bool("VIDEO_CAPTURE_WEBSITE", true),
     chromePath: opt("VIDEO_CHROME_PATH"),

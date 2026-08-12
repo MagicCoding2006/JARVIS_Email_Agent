@@ -13,6 +13,7 @@ import { runHumanDigest } from "./human-digest.js";
 import { syncMeetings } from "./meeting-lifecycle.js";
 import { calendlyEnabled } from "../services/calendly.service.js";
 import { imapEnabled, pollReplies } from "../services/imap-poller.service.js";
+import { pruneOldVideos } from "../services/video/retention.js";
 
 const log = createLogger("scheduler");
 let dispatchRunning = false;
@@ -103,6 +104,16 @@ export function startScheduler(): cron.ScheduledTask[] {
     }),
   );
 
+  // Nightly prune of rendered video artifacts (03:20, off-peak). Railway's disk
+  // would otherwise grow ~5MB per video forever — nothing else deletes them.
+  if (config.video.retentionDays > 0) {
+    tasks.push(
+      cron.schedule("20 3 * * *", () => {
+        pruneOldVideos().catch((err) => log.error("video prune failed", err));
+      }),
+    );
+  }
+
   // Monthly review (1st of the month, 09:30).
   tasks.push(
     cron.schedule("30 9 1 * *", () => {
@@ -111,7 +122,7 @@ export function startScheduler(): cron.ScheduledTask[] {
   );
 
   log.info(
-    `scheduler started (dispatch /5m, events /10m, reply-drafts /15m${imapEnabled() ? ", imap /1m" : ""}${calendlyEnabled() ? ", meetings /1h" : ""}, daily 08:30, digest Mon 08:00, weekly Mon 09:00, monthly 1st 09:30)`,
+    `scheduler started (dispatch /5m, events /10m, reply-drafts /15m${imapEnabled() ? ", imap /1m" : ""}${calendlyEnabled() ? ", meetings /1h" : ""}, daily 08:30, digest Mon 08:00, weekly Mon 09:00, monthly 1st 09:30${config.video.retentionDays > 0 ? `, video-prune 03:20 (${config.video.retentionDays}d)` : ""})`,
   );
   return tasks;
 }

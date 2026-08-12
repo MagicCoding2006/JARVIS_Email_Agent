@@ -1,8 +1,9 @@
 # Nixpacks build for Railway. The default Node build can't render video, so this:
 #   1. installs the system libraries Remotion's headless Chrome needs (aptPkgs),
+#      plus ffmpeg for Telegram voice notes,
 #   2. installs the nested remotion/ project's deps (own package + lockfile),
-#   3. bakes the Chrome Headless Shell into the image (`remotion browser ensure`)
-#      so the first render doesn't have to download it at runtime.
+#   3. bakes the Chrome Headless Shell and the Kokoro TTS weights into the image
+#      so neither has to download at runtime.
 # Package list is Remotion's official Linux dependency set:
 # https://www.remotion.dev/docs/miscellaneous/linux-dependencies
 
@@ -25,6 +26,9 @@ aptPkgs = [
   "libatk-bridge2.0-0",
   "fonts-liberation",
   "fontconfig",
+  # Telegram voice notes: transcodes the TTS engine's WAV to OGG/Opus, the only
+  # format Telegram renders as a voice message. Ubuntu's build has libopus.
+  "ffmpeg",
 ]
 
 # Overrides the default install phase — must install BOTH package trees.
@@ -40,4 +44,7 @@ cmds = [
 cmds = [
   "npm run build",
   "cd remotion && npx remotion browser ensure",
+  # Same idea for the Telegram voice model — cache it into node_modules now so
+  # it's in the image rather than downloaded on the first 🔊 tap.
+  "npm run prewarm:tts",
 ]

@@ -1,6 +1,14 @@
 import { config } from "../config/index.js";
 import { createLogger } from "../lib/logger.js";
-import { getUpdates, sendMessage, answerCallbackQuery, type TelegramUpdate } from "./telegram-client.js";
+import {
+  getUpdates,
+  sendMessage,
+  sendVoice,
+  answerCallbackQuery,
+  TTS_CALLBACK,
+  type TelegramUpdate,
+} from "./telegram-client.js";
+import { getTts, toSpeech } from "../services/tts/index.js";
 import { handleChat, resetChat } from "../agent/agent.js";
 import { executeApproval, denyApproval, formatApprovalMessage } from "../agent/approvals.js";
 import { ApprovalsRepo } from "../repositories/index.js";
@@ -61,6 +69,42 @@ async function pollLoop(): Promise<void> {
   }
 }
 
+/**
+ * 🔊 tap → read the message the button is attached to out loud.
+ *
+ * Telegram returns the source message inside the callback, so no text cache is
+ * needed — but it strips the content of messages older than ~48h, which shows
+ * up here as a missing `text`.
+ */
+async function handleVoiceRequest(cq: NonNullable<TelegramUpdate["callback_query"]>): Promise<void> {
+  const chatId = cq.message?.chat.id !== undefined ? String(cq.message.chat.id) : undefined;
+  const tts = getTts();
+  if (!tts) {
+    await answerCallbackQuery(cq.id, "Voice is turned off");
+    return;
+  }
+  const source = cq.message?.text;
+  if (!source) {
+    await answerCallbackQuery(cq.id, "That message is too old to read aloud");
+    return;
+  }
+  const text = toSpeech(source, config.tts.maxChars);
+  if (!text) {
+    await answerCallbackQuery(cq.id, "Nothing here to read");
+    return;
+  }
+  // Acknowledge before synthesizing: Telegram expires the callback in ~15s and
+  // leaves the button spinning until it's answered.
+  await answerCallbackQuery(cq.id, "Generating audio…");
+  try {
+    const { ogg } = await tts.synthesize(text);
+    await sendVoice(ogg, { chatId, replyToMessageId: cq.message?.message_id });
+  } catch (err) {
+    log.error("tts failed", err);
+    await sendMessage("⚠️ Couldn't generate the audio for that one.", { chatId });
+  }
+}
+
 async function handleUpdate(u: TelegramUpdate): Promise<void> {
   if (u.callback_query) {
     const cq = u.callback_query;
@@ -71,6 +115,14 @@ async function handleUpdate(u: TelegramUpdate): Promise<void> {
       return;
     }
     const [action, id] = (cq.data ?? "").split(":");
+    if (action === TTS_CALLBACK) {
+      // Deliberately not awaited: synthesis is CPU-bound and runs ~1.5x
+      // realtime, and pollLoop processes updates one at a time — awaiting here
+      // would make the bot ignore you for the length of the clip. The engine
+      // serializes its own work, so overlapping taps still queue safely.
+      void handleVoiceRequest(cq).catch((err) => log.error("voice request failed", err));
+      return;
+    }
     if (action === "approve") {
       const r = await executeApproval(id);
       await answerCallbackQuery(cq.id, r.ok ? "Approved ✅" : "Failed");
@@ -131,7 +183,7 @@ async function handleUpdate(u: TelegramUpdate): Promise<void> {
 
   try {
     const reply = await handleChat(text, sessionId, chatId);
-    await sendMessage(reply || "(no reply)", { chatId });
+    await sendMessage(reply || "(no reply)", { chatId, voice: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (/No tool call found for function call output with call_id/i.test(message)) {

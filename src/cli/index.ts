@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { parse } from "csv-parse/sync";
+import { config } from "../config/index.js";
 import { createLogger } from "../lib/logger.js";
 import { closeDb } from "../lib/mongo.js";
 import { ensureIndexes, getCollections } from "../repositories/collections.js";
@@ -25,6 +26,7 @@ import { getMailboxByEmail } from "../services/sender/mailbox.js";
 import { createGmailPixel } from "../services/compose.service.js";
 import { generateVariants, variantLeaderboard, pruneVariants, ensureCampaign } from "../services/variants.service.js";
 import { createVideoForLead, produceVideo } from "../services/video.service.js";
+import { pruneOldVideos } from "../services/video/retention.js";
 import { researchLead } from "../services/research.service.js";
 import { sourceLeadsFromApollo } from "../services/apollo.service.js";
 import { sourceLeadsFromApify } from "../services/apify.service.js";
@@ -630,6 +632,19 @@ async function cmdProduceVideo(p: Parsed) {
   log.info(`status: ${asset?.status} ${asset?.videoUrl ?? ""}`);
 }
 
+async function cmdPruneVideos(p: Parsed) {
+  // Destructive, so it previews by default and needs --yes to actually delete
+  // (npm swallows bare --flags, so an opt-in guard can't be trusted).
+  const dryRun = !p.flags.yes;
+  const days = int(p.flags.days, config.video.retentionDays);
+  const res = await pruneOldVideos({ maxAgeDays: days, dryRun });
+  log.info(
+    `${res.dryRun ? "[dry run] would delete" : "deleted"} ${res.deleted} file(s), ` +
+      `${(res.bytes / 1e6).toFixed(1)}MB; ${res.kept} kept (newer than ${days}d)`,
+  );
+  if (res.dryRun) log.info("nothing was removed — re-run with --yes to apply");
+}
+
 async function cmdApprovals() {
   const pending = await ApprovalsRepo.listPending();
   if (!pending.length) return log.info("no pending approvals");
@@ -676,6 +691,7 @@ const HELP = `AI SDR CLI
   create-video --email [--offer] [--campaign] [--purpose]   create script + render MP4 in one command
   video-script --email [--offer] [--campaign] [--purpose]   generate a Loom/video script + tracked link
   produce-video <videoId>       run TTS + scene spec + Remotion render for a scripted video
+  prune-videos [--days 30] [--yes]  delete rendered videos past the retention window (previews without --yes)
   chat --text "..."             ask the GLM agent (uses tools; high-risk = approval)
   agent-cycle                   run the autonomous daily brain now
   discover-leads --role "VP Ops" --industry "Healthcare" [--company --location --keywords --limit]   FREE sourcing
@@ -743,6 +759,7 @@ async function run() {
     case "create-video": await cmdCreateVideo(p); break;
     case "video-script": await cmdVideoScript(p); break;
     case "produce-video": await cmdProduceVideo(p); break;
+    case "prune-videos": await cmdPruneVideos(p); break;
     case "chat": await cmdChat(p); break;
     case "agent-cycle": await cmdAgentCycle(); break;
     case "discover-leads": await cmdDiscoverLeads(p); break;

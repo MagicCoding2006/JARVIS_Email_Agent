@@ -1,5 +1,6 @@
 import { config } from "../config/index.js";
 import { createLogger } from "../lib/logger.js";
+import { ttsEnabled } from "../services/tts/index.js";
 
 const log = createLogger("telegram");
 
@@ -29,6 +30,12 @@ function splitText(text: string): string[] {
   return chunks;
 }
 
+/** Callback payload for the 🔊 button. No id needed: Telegram hands the whole
+ *  source message back on the callback, so there's nothing to look up. */
+export const TTS_CALLBACK = "tts";
+
+const VOICE_BUTTON: InlineButton = { text: "🔊 Voice", data: TTS_CALLBACK };
+
 async function sendMessageChunk(text: string, opts: { chatId?: string; buttons?: InlineButton[][] }): Promise<void> {
   const chat_id = opts.chatId ?? config.telegram.chatId;
   if (!chat_id) return;
@@ -48,19 +55,52 @@ async function sendMessageChunk(text: string, opts: { chatId?: string; buttons?:
 
 export async function sendMessage(
   text: string,
-  opts: { chatId?: string; buttons?: InlineButton[][] } = {},
+  opts: { chatId?: string; buttons?: InlineButton[][]; voice?: boolean } = {},
 ): Promise<void> {
   if (!config.telegram.botToken) return;
   try {
     const chunks = splitText(text);
     for (let i = 0; i < chunks.length; i++) {
+      // Every chunk gets its own 🔊 (each is a separate message, and the handler
+      // only ever sees the one it's attached to), but action buttons stay on the
+      // last chunk so a split message doesn't offer Approve twice.
+      const last = i === chunks.length - 1;
+      const rows = [...(last && opts.buttons ? opts.buttons : [])];
+      if (opts.voice && ttsEnabled()) rows.push([VOICE_BUTTON]);
       await sendMessageChunk(chunks[i], {
         chatId: opts.chatId,
-        buttons: i === chunks.length - 1 ? opts.buttons : undefined,
+        buttons: rows.length ? rows : undefined,
       });
     }
   } catch (err) {
     log.error("sendMessage failed", err);
+  }
+}
+
+/**
+ * Upload an OGG/Opus buffer as a voice note. Node 20's built-in FormData/Blob
+ * handle the multipart body, so this needs no upload dependency.
+ */
+export async function sendVoice(
+  ogg: Buffer,
+  opts: { chatId?: string; replyToMessageId?: number } = {},
+): Promise<void> {
+  if (!config.telegram.botToken) return;
+  const chat_id = opts.chatId ?? config.telegram.chatId;
+  if (!chat_id) return;
+  try {
+    const form = new FormData();
+    form.append("chat_id", chat_id);
+    form.append("voice", new Blob([ogg], { type: "audio/ogg" }), "voice.ogg");
+    if (opts.replyToMessageId !== undefined) {
+      form.append("reply_to_message_id", String(opts.replyToMessageId));
+      // The source message may have scrolled away; don't fail the whole send.
+      form.append("allow_sending_without_reply", "true");
+    }
+    const res = await fetch(api("sendVoice"), { method: "POST", body: form });
+    if (!res.ok) log.warn(`sendVoice ${res.status}: ${await res.text()}`);
+  } catch (err) {
+    log.error("sendVoice failed", err);
   }
 }
 
@@ -79,7 +119,9 @@ export interface TelegramUpdate {
   callback_query?: {
     id: string;
     data?: string;
-    message?: { chat: { id: number }; message_id: number };
+    // `text` is what the 🔊 handler reads back. Telegram omits it for messages
+    // older than ~48h (they arrive as an "inaccessible message" stub).
+    message?: { chat: { id: number }; message_id: number; text?: string };
     from?: { id: number };
   };
 }
