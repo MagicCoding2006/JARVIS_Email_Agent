@@ -1,6 +1,8 @@
 import express, { type Request, type Response } from "express";
+import http from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { WebSocketServer } from "ws";
 import { config } from "../config/index.js";
 import { createLogger } from "../lib/logger.js";
 import { ensureIndexes } from "../repositories/collections.js";
@@ -10,6 +12,8 @@ import { createGmailPixel } from "../services/compose.service.js";
 import { handleBookingWebhook, type BookingProvider } from "../services/booking.service.js";
 import { trackingUrls } from "../services/tracking.service.js";
 import { createDashboardRouter } from "./dashboard.js";
+import { createVoiceRouter } from "./voice.routes.js";
+import { handleMediaStream } from "../services/voice/media-bridge.js";
 
 const log = createLogger("tracking-server");
 
@@ -43,6 +47,10 @@ export function createApp() {
       fallthrough: false,
     }),
   );
+
+  // ── Voice (TwiML answer + call status callbacks) ────────────────────────────
+  // The matching wss:// media stream is attached in startTrackingServer.
+  if (config.voice.enabled) app.use("/voice", createVoiceRouter());
 
   // ── Dashboard ────────────────────────────────────────────────────────────────
   app.use("/dashboard", createDashboardRouter());
@@ -219,10 +227,42 @@ function publicVideoUrl(videoUrl?: string): string | undefined {
   }
 }
 
+/**
+ * Attach the Twilio media-stream socket.
+ *
+ * `noServer` mode rather than a second listener: the carrier has to reach this
+ * over the same public HTTPS host as the TwiML webhook, and hosts like Railway
+ * only route one port. Non-voice upgrade requests are refused so this doesn't
+ * become a general-purpose websocket endpoint.
+ */
+function attachVoiceStream(server: http.Server): void {
+  const wss = new WebSocketServer({ noServer: true });
+  const MEDIA_PATH = /^\/voice\/media\/([\w-]+)$/;
+
+  server.on("upgrade", (req, socket, head) => {
+    const match = MEDIA_PATH.exec((req.url ?? "").split("?")[0]);
+    if (!match) {
+      socket.destroy();
+      return;
+    }
+    const callId = match[1];
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      handleMediaStream(ws, callId).catch((err) => {
+        log.error(`media stream failed for call ${callId}`, err);
+        ws.close();
+      });
+    });
+  });
+  log.info("voice media stream attached at /voice/media/:callId");
+}
+
 export async function startTrackingServer(): Promise<void> {
   const app = createApp();
+  const server = http.createServer(app);
+  if (config.voice.enabled) attachVoiceStream(server);
+
   await new Promise<void>((resolve, reject) => {
-    const server = app.listen(config.tracking.port, () => {
+    server.listen(config.tracking.port, () => {
       log.info(`tracking server listening on :${config.tracking.port} (public: ${config.tracking.baseURL})`);
       resolve();
     });

@@ -23,6 +23,11 @@ import type {
   MailboxState,
   PlaybookNote,
   SendPaceOverride,
+  Call,
+  CallStatus,
+  CallOutcome,
+  CallTurn,
+  DncEntry,
 } from "../models/types.js";
 
 const now = () => new Date();
@@ -47,21 +52,18 @@ export const LeadsRepo = {
       );
       return res as Lead;
     }
+    // Carry every caller-supplied field through, THEN stamp the ones this repo
+    // owns. Listing fields individually here silently dropped any newly added
+    // Lead property on insert (that is how `phone` went missing on every
+    // imported lead), so the passthrough is deliberate — only the managed
+    // fields below are allowed to be authoritative.
     const doc: Lead = {
+      ...(stripUndefined(input) as Partial<Lead>),
       _id: uuid(),
       email,
-      name: input.name,
-      firstName: input.firstName,
-      lastName: input.lastName,
-      title: input.title,
-      company: input.company,
-      industry: input.industry,
-      website: input.website,
-      linkedin: input.linkedin,
       source: input.source ?? "manual",
       status: input.status ?? "new",
       score: input.score ?? 0,
-      timezone: input.timezone,
       customFields: input.customFields ?? {},
       unsubscribeToken: token(),
       unsubscribed: false,
@@ -81,6 +83,12 @@ export const LeadsRepo = {
   async getByEmail(email: string): Promise<Lead | null> {
     const c = await getCollections();
     return c.leads.findOne({ email: email.trim().toLowerCase() });
+  },
+
+  /** Look a lead up by E.164 number — pass it through normalizePhone first. */
+  async getByPhone(phone: string): Promise<Lead | null> {
+    const c = await getCollections();
+    return c.leads.findOne({ phone });
   },
 
   async getMany(ids: string[]): Promise<Lead[]> {
@@ -836,6 +844,243 @@ export const SendPaceRepo = {
   async reset(): Promise<void> {
     const c = await getCollections();
     await c.sendPace.deleteOne({ _id: "send_pace" });
+  },
+};
+
+// ── Calls (voice channel) ────────────────────────────────────────────────────
+export const CallsRepo = {
+  async create(input: {
+    leadId: string;
+    toNumber: string;
+    fromNumber: string;
+    provider: string;
+    campaignId?: string;
+    enrollmentId?: string;
+    scheduledAt?: Date;
+    attempt?: number;
+    scriptId?: string;
+  }): Promise<Call> {
+    const c = await getCollections();
+    const doc: Call = {
+      _id: uuid(),
+      leadId: input.leadId,
+      campaignId: input.campaignId,
+      enrollmentId: input.enrollmentId,
+      toNumber: input.toNumber,
+      fromNumber: input.fromNumber,
+      provider: input.provider,
+      status: "queued",
+      attempt: input.attempt ?? 1,
+      scriptId: input.scriptId,
+      objections: [],
+      askCount: 0,
+      transcript: [],
+      durationSec: 0,
+      scheduledAt: input.scheduledAt ?? now(),
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    await c.calls.insertOne(doc);
+    return doc;
+  },
+
+  async getById(id: string): Promise<Call | null> {
+    const c = await getCollections();
+    return c.calls.findOne({ _id: id });
+  },
+
+  async getByProviderCallId(providerCallId: string): Promise<Call | null> {
+    const c = await getCollections();
+    return c.calls.findOne({ providerCallId });
+  },
+
+  /** Queued calls whose time has come, oldest first — the dialer's work list. */
+  async dueQueued(limit = 20, at = new Date()): Promise<Call[]> {
+    const c = await getCollections();
+    return c.calls
+      .find({ status: "queued", scheduledAt: { $lte: at } })
+      .sort({ scheduledAt: 1 })
+      .limit(limit)
+      .toArray();
+  },
+
+  /**
+   * Calls currently tying up a line — bounds concurrency against the carrier.
+   *
+   * `since` excludes rows that merely LOOK live. A bridge that crashed, a status
+   * webhook that never arrived, or a process killed mid-call leaves a row stuck
+   * in `dialing`/`in_progress` forever; counting those would permanently consume
+   * the concurrency budget until the dialer could never place another call.
+   */
+  async countLive(since?: Date): Promise<number> {
+    const c = await getCollections();
+    const filter: Record<string, unknown> = { status: { $in: ["dialing", "in_progress"] } };
+    if (since) filter.updatedAt = { $gte: since };
+    return c.calls.countDocuments(filter);
+  },
+
+  /**
+   * Close out calls that claim to be live but cannot be: no carrier leg lasts
+   * longer than the call ceiling, so anything older than that lost its
+   * completion signal and must not hold a slot.
+   */
+  async reapStale(before: Date): Promise<number> {
+    const c = await getCollections();
+    const res = await c.calls.updateMany(
+      { status: { $in: ["dialing", "in_progress"] }, updatedAt: { $lt: before } },
+      {
+        $set: {
+          status: "failed",
+          failureReason: "stale — no completion signal (bridge or webhook never finished the call)",
+          endedAt: now(),
+          updatedAt: now(),
+        },
+      },
+    );
+    return res.modifiedCount;
+  },
+
+  async countPlacedSince(since: Date): Promise<number> {
+    const c = await getCollections();
+    return c.calls.countDocuments({
+      startedAt: { $gte: since },
+      status: { $nin: ["queued", "skipped", "canceled"] },
+    });
+  },
+
+  /** Attempts already made against this lead (any campaign), for the retry cap. */
+  async countAttemptsForLead(leadId: string): Promise<number> {
+    const c = await getCollections();
+    return c.calls.countDocuments({
+      leadId,
+      status: { $in: ["completed", "no_answer", "busy", "failed", "in_progress", "dialing"] },
+    });
+  },
+
+  async recentForLead(leadId: string, limit = 10): Promise<Call[]> {
+    const c = await getCollections();
+    return c.calls.find({ leadId }).sort({ createdAt: -1 }).limit(limit).toArray();
+  },
+
+  async list(filter: { status?: CallStatus; campaignId?: string } = {}, limit = 50): Promise<Call[]> {
+    const c = await getCollections();
+    return c.calls
+      .find(stripUndefined(filter) as Record<string, unknown>)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .toArray();
+  },
+
+  async setStatus(
+    id: string,
+    status: CallStatus,
+    patch: Partial<Pick<Call, "providerCallId" | "failureReason" | "startedAt" | "endedAt" | "durationSec" | "recordingUrl">> = {},
+  ): Promise<void> {
+    const c = await getCollections();
+    await c.calls.updateOne({ _id: id }, { $set: { status, ...stripUndefined(patch), updatedAt: now() } });
+  },
+
+  /** Append one transcript turn as it happens, so a dropped call still has history. */
+  async appendTurn(id: string, turn: CallTurn): Promise<void> {
+    const c = await getCollections();
+    await c.calls.updateOne({ _id: id }, { $push: { transcript: turn }, $set: { updatedAt: now() } });
+  },
+
+  async incrementAsk(id: string): Promise<number> {
+    const c = await getCollections();
+    const res = await c.calls.findOneAndUpdate(
+      { _id: id },
+      { $inc: { askCount: 1 }, $set: { updatedAt: now() } },
+      { returnDocument: "after" },
+    );
+    return res?.askCount ?? 0;
+  },
+
+  async addObjection(id: string, code: string): Promise<void> {
+    const c = await getCollections();
+    await c.calls.updateOne({ _id: id }, { $addToSet: { objections: code }, $set: { updatedAt: now() } });
+  },
+
+  async setAnalysis(
+    id: string,
+    patch: Partial<Pick<Call, "outcome" | "summary" | "nextAction" | "objections" | "askCount" | "meetingTime">>,
+  ): Promise<void> {
+    const c = await getCollections();
+    await c.calls.updateOne({ _id: id }, { $set: { ...stripUndefined(patch), updatedAt: now() } });
+  },
+
+  /** Queue a follow-up attempt after a no-answer/busy. */
+  async cancelQueuedForLead(leadId: string, reason: string): Promise<number> {
+    const c = await getCollections();
+    const res = await c.calls.updateMany(
+      { leadId, status: "queued" },
+      { $set: { status: "canceled", failureReason: reason, updatedAt: now() } },
+    );
+    return res.modifiedCount;
+  },
+
+  async outcomeCounts(since: Date): Promise<Record<string, number>> {
+    const c = await getCollections();
+    const rows = await c.calls
+      .aggregate<{ _id: CallOutcome | null; n: number }>([
+        { $match: { createdAt: { $gte: since } } },
+        { $group: { _id: "$outcome", n: { $sum: 1 } } },
+      ])
+      .toArray();
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r._id ?? "pending"] = r.n;
+    return out;
+  },
+
+  async statusCounts(since: Date): Promise<Record<string, number>> {
+    const c = await getCollections();
+    const rows = await c.calls
+      .aggregate<{ _id: CallStatus; n: number }>([
+        { $match: { createdAt: { $gte: since } } },
+        { $group: { _id: "$status", n: { $sum: 1 } } },
+      ])
+      .toArray();
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r._id] = r.n;
+    return out;
+  },
+
+  /** Objection frequency across recent calls — what the pitch keeps running into. */
+  async objectionCounts(since: Date): Promise<Record<string, number>> {
+    const c = await getCollections();
+    const rows = await c.calls
+      .aggregate<{ _id: string; n: number }>([
+        { $match: { createdAt: { $gte: since } } },
+        { $unwind: "$objections" },
+        { $group: { _id: "$objections", n: { $sum: 1 } } },
+        { $sort: { n: -1 } },
+      ])
+      .toArray();
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r._id] = r.n;
+    return out;
+  },
+};
+
+// ── Do-not-call list ─────────────────────────────────────────────────────────
+export const DncRepo = {
+  async add(phone: string, reason: string, source: DncEntry["source"], leadId?: string): Promise<void> {
+    const c = await getCollections();
+    await c.dnc.updateOne(
+      { _id: phone },
+      { $setOnInsert: { reason, source, leadId, createdAt: now() } },
+      { upsert: true },
+    );
+  },
+
+  async has(phone: string): Promise<boolean> {
+    const c = await getCollections();
+    return (await c.dnc.countDocuments({ _id: phone }, { limit: 1 })) > 0;
+  },
+
+  async list(limit = 100): Promise<DncEntry[]> {
+    const c = await getCollections();
+    return c.dnc.find({}).sort({ createdAt: -1 }).limit(limit).toArray();
   },
 };
 

@@ -15,6 +15,8 @@ import type {
   MailboxState,
   PlaybookNote,
   SendPaceOverride,
+  Call,
+  DncEntry,
 } from "../models/types.js";
 
 const log = createLogger("db");
@@ -33,6 +35,8 @@ export const COLLECTIONS = {
   mailboxStates: "mailbox_states",
   playbookNotes: "playbook_notes",
   sendPace: "send_pace",
+  calls: "calls",
+  dnc: "dnc",
 } as const;
 
 export interface Collections {
@@ -49,6 +53,8 @@ export interface Collections {
   mailboxStates: Collection<MailboxState>;
   playbookNotes: Collection<PlaybookNote>;
   sendPace: Collection<SendPaceOverride>;
+  calls: Collection<Call>;
+  dnc: Collection<DncEntry>;
 }
 
 export async function getCollections(): Promise<Collections> {
@@ -67,6 +73,8 @@ export async function getCollections(): Promise<Collections> {
     mailboxStates: db.collection<MailboxState>(COLLECTIONS.mailboxStates),
     playbookNotes: db.collection<PlaybookNote>(COLLECTIONS.playbookNotes),
     sendPace: db.collection<SendPaceOverride>(COLLECTIONS.sendPace),
+    calls: db.collection<Call>(COLLECTIONS.calls),
+    dnc: db.collection<DncEntry>(COLLECTIONS.dnc),
   };
 }
 
@@ -78,6 +86,8 @@ export async function ensureIndexes(): Promise<void> {
     c.leads.createIndex({ status: 1 }),
     c.leads.createIndex({ score: -1 }),
     c.leads.createIndex({ unsubscribeToken: 1 }),
+    // Not unique: two contacts at one company legitimately share a main line.
+    c.leads.createIndex({ phone: 1 }, { sparse: true }),
 
     c.campaigns.createIndex({ status: 1 }),
 
@@ -104,6 +114,13 @@ export async function ensureIndexes(): Promise<void> {
     c.approvals.createIndex({ status: 1, createdAt: -1 }),
     c.playbookNotes.createIndex({ createdAt: -1 }),
     c.playbookNotes.createIndex({ tags: 1 }),
+
+    // The dialer's hot path: due queued calls, oldest first.
+    c.calls.createIndex({ status: 1, scheduledAt: 1 }),
+    c.calls.createIndex({ leadId: 1, createdAt: -1 }),
+    c.calls.createIndex({ providerCallId: 1 }, { sparse: true }),
+    c.calls.createIndex({ campaignId: 1, status: 1 }),
+    c.dnc.createIndex({ createdAt: -1 }),
   ]);
   log.info("indexes ensured");
 }

@@ -253,6 +253,152 @@ export const config = {
     // this bounds one tap to well under a minute of compute.
     maxChars: num("TTS_MAX_CHARS", 900),
   },
+  voice: {
+    // Master switch for the outbound calling channel. Off → the dialer never
+    // runs, the media bridge refuses connections, and the agent's call tools
+    // report the channel as disabled.
+    enabled: bool("VOICE_ENABLED", false),
+    // "twilio" places real calls; "dry-run" logs what it would dial (and is
+    // forced whenever DRY_RUN=true, exactly like the email sender).
+    provider: opt("VOICE_PROVIDER", "twilio").toLowerCase(),
+    // How the agent introduces itself. Used in the opener and the voicemail.
+    agentName: opt("VOICE_AGENT_NAME", "Alex"),
+    // Sales rep whose calendar/inbox the meeting lands on (used in confirmations).
+    repName: opt("VOICE_REP_NAME") || opt("FROM_NAME", "Sales"),
+    twilio: {
+      // Account identifier ("AC…"). Always required — it is in every API path,
+      // even when authenticating with a scoped API key.
+      accountSid: opt("TWILIO_ACCOUNT_SID"),
+      // Master password. Needed for REST calls when no API key is set, AND —
+      // separately — to verify inbound webhook signatures, which Twilio always
+      // signs with the account auth token, never with an API key secret.
+      authToken: opt("TWILIO_AUTH_TOKEN"),
+      // Optional scoped credential ("SK…" + its secret). Preferred for REST:
+      // revocable on its own without rotating the account token.
+      apiKeySid: opt("TWILIO_API_KEY_SID"),
+      apiKeySecret: opt("TWILIO_API_KEY_SECRET"),
+      // Verified caller ID to dial from (E.164).
+      fromNumber: opt("TWILIO_FROM_NUMBER"),
+      // Reject webhook posts that aren't signed by Twilio. Keep ON in production:
+      // the media-stream URL is public, and an unsigned POST can start a call leg.
+      validateSignature: bool("TWILIO_VALIDATE_SIGNATURE", true),
+    },
+    realtime: {
+      // Speech-to-speech model endpoint (OpenAI Realtime or any wire-compatible
+      // host). The bridge speaks G.711 μ-law both ways so no transcoding is
+      // needed between the carrier and the model.
+      //
+      // This role — and ONLY this role — requires OpenAI. The worker and
+      // strategist keep their own routing (OAuth harness, z.ai, whatever), so
+      // metered OpenAI spend is confined to live calls.
+      baseURL: opt("VOICE_REALTIME_URL", "wss://api.openai.com/v1/realtime"),
+      model: opt("VOICE_REALTIME_MODEL", "gpt-realtime-2"),
+      // "api-key" = a platform key (predictable, metered per audio minute).
+      // "openai-oauth" = a ChatGPT/Codex token, billed against a subscription.
+      // The OAuth token EXPIRES and must refresh; see services/voice/realtime-auth.ts
+      // and check `voice-preflight` for the remaining runway before relying on it.
+      auth: (opt("VOICE_REALTIME_AUTH", "api-key") as "api-key" | "openai-oauth"),
+      // Credentials file for auth="openai-oauth". Defaults to ~/.codex/auth.json.
+      oauthFile: opt("VOICE_REALTIME_OAUTH_FILE") || opt("WORKER_OAUTH_FILE") || opt("OPENAI_OAUTH_FILE"),
+      // Falls back to the worker key ONLY when the worker is itself OpenAI;
+      // realtimeReadiness() warns when that fallback can't work.
+      apiKey: opt("VOICE_REALTIME_API_KEY") || opt("WORKER_API_KEY"),
+      voice: opt("VOICE_REALTIME_VOICE", "marin"),
+      // "ga" = current session schema (audio.input/audio.output); "beta" = the
+      // older realtime=v1 shape. Inbound events are accepted in both shapes.
+      schema: (opt("VOICE_REALTIME_SCHEMA", "ga") as "ga" | "beta"),
+      // Model that transcribes the PROSPECT's audio for the transcript/analysis.
+      transcriptionModel: opt("VOICE_TRANSCRIPTION_MODEL", "gpt-realtime-whisper"),
+      // ── Turn-taking (server VAD) ──────────────────────────────────────────
+      // These three decide whether the agent feels like a person or a walkie-
+      // talkie, and they are tuned for a PHONE call, not a headset.
+      //
+      // threshold      how loud counts as speech (0–1). Higher ignores more
+      //                background noise but misses a soft-spoken prospect.
+      // prefixPadding  audio kept from BEFORE the trigger, so the first
+      //                syllable isn't clipped off the transcript.
+      // silenceMs      how long they must stop before the agent takes its turn.
+      //                Short = responsive; too short = it interrupts a pause.
+      // "semantic" lets the MODEL judge whether they have finished a thought —
+      // it waits through "well… I mean…" but answers instantly on a clear stop.
+      // "server_vad" is the raw silence timer below. Semantic is the better fit
+      // for a phone conversation; server_vad is predictable and free of a
+      // classifier's judgment calls.
+      turnDetection: (opt("VOICE_TURN_DETECTION", "semantic") as "semantic" | "server_vad"),
+      // low = let them ramble, auto = balanced, high = jump in fast.
+      semanticEagerness: opt("VOICE_SEMANTIC_EAGERNESS", "high"),
+      vadThreshold: num("VOICE_VAD_THRESHOLD", 0.23),
+      prefixPaddingMs: num("VOICE_PREFIX_PADDING_MS", 180),
+      silenceMs: num("VOICE_SILENCE_MS", 50),
+      // Input denoising profile. "far_field" suits a prospect on speakerphone,
+      // in a truck, or on a job site; "near_field" suits a handset held to the
+      // ear; "none" disables it.
+      noiseReduction: opt("VOICE_NOISE_REDUCTION", "far_field").toLowerCase(),
+      // Cap on one spoken turn. 0 = uncapped ("inf"). The brevity rules in the
+      // call script do the real work here; this is just a backstop against a
+      // runaway monologue burning metered audio.
+      maxOutputTokens: num("VOICE_MAX_OUTPUT_TOKENS", 0),
+    },
+    // Outbound audio treatment. Changes timbre only — pacing and turn-taking
+    // are prompt/VAD concerns. See services/voice/audio-filter.ts.
+    humanize: {
+      enabled: bool("VOICE_HUMANIZE", false),
+      // Noise floor that replaces mathematically dead silence. -55 is a quiet
+      // room; -45 is a busy office. Below -70 is inaudible.
+      comfortNoiseDb: num("VOICE_COMFORT_NOISE_DB", -58),
+      // Drive into a soft limiter, in dB. Adds phone-line presence. Above ~6
+      // starts to sound squashed on narrowband audio.
+      driveDb: num("VOICE_DRIVE_DB", 0),
+      // Gentle consonant/presence lift for clearer handset audio. 0 disables.
+      clarityDb: num("VOICE_CLARITY_DB", 1.5),
+      // Drop some low-energy frames after the first few dozen ms of silence.
+      // This tightens punctuation gaps without speeding up voiced syllables.
+      compressPauses: bool("VOICE_COMPRESS_PAUSES", true),
+      pauseKeepMs: num("VOICE_PAUSE_KEEP_MS", 80),
+      pauseThresholdDb: num("VOICE_PAUSE_THRESHOLD_DB", -48),
+      // Speed up only the first few hundred ms of the first agent utterance.
+      // Used for the "Hello" lead-in without making the whole call rushed.
+      fastStart: bool("VOICE_FAST_START", true),
+      fastStartMs: num("VOICE_FAST_START_MS", 260),
+      fastStartRate: num("VOICE_FAST_START_RATE", 1.3),
+    },
+    // Warm-transfer target for "put me through to a human". Empty → the tool
+    // reports itself unavailable instead of pretending to transfer.
+    transferNumber: opt("VOICE_TRANSFER_NUMBER"),
+    // Ask Twilio to record calls. Recording laws are two-party-consent in many
+    // states/countries — leaving this on adds a spoken disclosure to the opener.
+    record: bool("VOICE_RECORD", false),
+    dialing: {
+      // Local-to-the-prospect calling window (their timezone when the lead has
+      // one, otherwise the server's). US telemarketing rules are 8am–9pm local;
+      // the default is deliberately tighter than the legal maximum.
+      windowStartHour: num("VOICE_WINDOW_START_HOUR", 9),
+      windowEndHour: num("VOICE_WINDOW_END_HOUR", 17),
+      callOnWeekends: bool("VOICE_CALL_ON_WEEKENDS", false),
+      // Hard ceilings. Concurrency bounds simultaneous carrier legs (each one
+      // costs a realtime session); the daily cap bounds spend and reputation.
+      maxConcurrent: num("VOICE_MAX_CONCURRENT", 2),
+      dailyLimit: num("VOICE_DAILY_CALL_LIMIT", 50),
+      // Attempts per lead before the number is retired from the dialer.
+      maxAttempts: num("VOICE_MAX_ATTEMPTS", 3),
+      // Hours to wait before retrying a no-answer (jittered across the window).
+      retryHours: num("VOICE_RETRY_HOURS", 24),
+      // Hard hangup. Bounds the worst case: a stuck session burning realtime
+      // minutes on an open line. A real cold call that works closes well inside this.
+      maxCallSeconds: num("VOICE_MAX_CALL_SECONDS", 300),
+    },
+    close: {
+      // How many times the agent may ask for the meeting before it must accept
+      // "no" and fall back to email. Real objection handling needs more than one
+      // ask; more than ~3 is harassment and burns the brand.
+      maxAsks: num("VOICE_MAX_ASKS", 3),
+      // Length of meeting the agent asks for (defaults to the email CTA's).
+      meetingMinutes: num("VOICE_MEETING_MINUTES", num("MEETING_LENGTH_MIN", 15)),
+    },
+    // Say "I'm an AI assistant" in the opener, unprompted. Independent of this,
+    // the agent ALWAYS admits it when asked — that rule is not configurable.
+    discloseAiUpfront: bool("VOICE_DISCLOSE_AI_UPFRONT", true),
+  },
   video: {
     outputDir: opt("VIDEO_OUTPUT_DIR", "data/videos"),
     // Days to keep rendered videos before the nightly prune removes them. These

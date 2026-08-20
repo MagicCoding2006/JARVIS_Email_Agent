@@ -19,7 +19,7 @@
     "prewarm:tts": "node scripts/prewarm-tts.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:video": "cd remotion && npx tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test src/agent/approvals.test.ts src/agent/history.test.ts src/services/sender/mailbox.test.ts src/services/tracking.service.test.ts",
+    "test": "node --import tsx --test src/agent/approvals.test.ts src/agent/history.test.ts src/services/sender/mailbox.test.ts src/services/tracking.service.test.ts src/services/voice/compliance.test.ts src/services/voice/realtime-auth.test.ts src/services/voice/audio-filter.test.ts",
     "verify": "npm run typecheck && npm run typecheck:video && npm test",
     "railway:check": "npm run build && node scripts/railway-smoke.mjs",
     "oauth:railway": "node scripts/refresh-railway-oauth.mjs",
@@ -31,6 +31,7 @@
   "dependencies": {
     "@openai-oauth/local": "^2.0.0",
     "@openai-oauth/openai-client": "^2.0.0",
+    "@types/ws": "^8.18.1",
     "csv-parse": "^5.5.6",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
@@ -41,7 +42,8 @@
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.16",
     "openai": "^4.77.0",
-    "openai-oauth": "^2.0.0"
+    "openai-oauth": "^2.0.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

@@ -21,6 +21,17 @@ export const SCORE_WEIGHTS: Partial<Record<EventType, number>> = {
   closed_lost: -10,
   unsubscribe: -100,
   bounce: -50,
+
+  // Voice. A live conversation is a far stronger signal than an open, so a
+  // connected call outscores every email engagement short of a reply. A booked
+  // meeting still comes through the shared `booked` event above.
+  call_placed: 0,
+  call_connected: 25,
+  call_positive: 60,
+  call_negative: -30,
+  call_no_answer: 0,
+  call_voicemail: 2,
+  call_dnc: -100,
 };
 
 /** A click whose link label/url matches one of these scores higher ("intent"). */

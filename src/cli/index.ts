@@ -34,6 +34,14 @@ import { discoverLeads } from "../services/discovery.service.js";
 import { discoverBusinessContacts, discoverContractors } from "../services/business-discovery.service.js";
 import { buildCrmSnapshot, toCsv, printCrmTable } from "../services/crm.service.js";
 import { emailCandidates, verifyBestEmail } from "../lib/email-verify.js";
+import { dialDue, queueCall } from "../workers/dialer.js";
+import { simulateCall } from "../services/voice/simulator.js";
+import { voicePreflightAutodetect } from "../services/voice/preflight.js";
+import { canCall, addToDnc, normalizePhone } from "../services/voice/compliance.service.js";
+import { getTelephony, signatureValidationReady } from "../services/voice/twilio.telephony.js";
+import { realtimeAuthCheck } from "../services/voice/openai-realtime.js";
+import { buildCallInstructions } from "../services/voice/script.js";
+import { CallsRepo, DncRepo } from "../repositories/index.js";
 import { handleChat } from "../agent/agent.js";
 import { runAutonomousCycle } from "../workers/autonomous-cycle.js";
 import { executeApproval, denyApproval } from "../agent/approvals.js";
@@ -82,7 +90,7 @@ async function cmdImportLeads(p: Parsed) {
   const raw = readFileSync(file, "utf-8");
   const rows: Record<string, string>[] = parse(raw, { columns: true, skip_empty_lines: true, trim: true });
   const known = new Set([
-    "email", "name", "firstname", "lastname", "title", "company",
+    "email", "phone", "name", "firstname", "lastname", "title", "company",
     "industry", "website", "linkedin", "source", "timezone",
   ]);
   let imported = 0;
@@ -96,6 +104,8 @@ async function cmdImportLeads(p: Parsed) {
     }
     await LeadsRepo.upsertByEmail({
       email,
+      // Normalized at import so the dialer never has to guess at a raw string.
+      phone: normalizePhone(get("phone")),
       name: get("name") || undefined,
       firstName: get("firstName") || get("firstname") || undefined,
       lastName: get("lastName") || get("lastname") || undefined,
@@ -115,9 +125,11 @@ async function cmdImportLeads(p: Parsed) {
 
 async function cmdAddLead(p: Parsed) {
   const email = str(p.flags.email);
-  if (!email) throw new Error("usage: cli add-lead --email <e> [--name --company --title --industry]");
+  if (!email) throw new Error("usage: cli add-lead --email <e> [--name --company --title --industry --phone --timezone]");
   const lead = await LeadsRepo.upsertByEmail({
     email,
+    phone: normalizePhone(str(p.flags.phone)),
+    timezone: str(p.flags.timezone) || undefined,
     name: str(p.flags.name) || undefined,
     company: str(p.flags.company) || undefined,
     title: str(p.flags.title) || undefined,
@@ -665,6 +677,330 @@ async function cmdDeny(p: Parsed) {
   log.info("denied");
 }
 
+// ── voice / cold calling ─────────────────────────────────────────────────────
+async function cmdCallLead(p: Parsed) {
+  const email = p._[0] || str(p.flags.email);
+  if (!email) throw new Error('usage: cli call-lead <email> [--campaign <id>] [--at "2026-08-13T15:00:00"]');
+  const lead = await LeadsRepo.getByEmail(email);
+  if (!lead) throw new Error(`lead not found: ${email}`);
+
+  const when = str(p.flags.at) ? new Date(str(p.flags.at)) : undefined;
+  const res = await queueCall({ leadId: lead._id, campaignId: str(p.flags.campaign) || undefined, scheduledAt: when });
+  if (!res.queued) throw new Error(`not queued — ${res.reason}`);
+  log.info(`queued call ${res.callId} → ${lead.phone} (${lead.email})`);
+  if (config.sending.dryRun) log.warn("DRY_RUN=true → the dialer will log the call instead of placing it");
+  log.info("the dialer places it on the next run; force one now with: npm run cli dial");
+}
+
+async function cmdDial() {
+  const r = await dialDue();
+  log.info(`dialer: ${r.placed} placed, ${r.skipped} skipped`);
+}
+
+async function cmdCallSim(p: Parsed) {
+  const email = p._[0] || str(p.flags.email);
+  if (!email) {
+    throw new Error(
+      'usage: cli call-sim <email> [--persona "skeptical HVAC owner, mid-job"] [--offer "..."] [--turns 14]',
+    );
+  }
+  const lead = await LeadsRepo.getByEmail(email);
+  if (!lead) throw new Error(`lead not found: ${email}`);
+  const campaign = str(p.flags.campaign) ? await ensureCampaign(str(p.flags.campaign)) : null;
+  const persona = str(p.flags.persona) || undefined;
+
+  // eslint-disable-next-line no-console
+  console.log(
+    `\n— simulated cold call to ${lead.name ?? lead.email} —\n` +
+      (persona ? `prospect persona: ${persona}\n` : "type the prospect's replies; blank line or /end hangs up\n"),
+  );
+  const r = await simulateCall({
+    lead,
+    campaign: campaign ?? undefined,
+    offer: str(p.flags.offer) || undefined,
+    persona,
+    maxTurns: int(p.flags.turns, 14),
+    onTurn: (role, text) => {
+      // eslint-disable-next-line no-console
+      console.log(`${role === "agent" ? "🤖 agent" : "🧑 prospect"}: ${text}`);
+    },
+  });
+  const call = await CallsRepo.getById(r.callId);
+  // eslint-disable-next-line no-console
+  console.log(
+    `\n— result —\noutcome: ${call?.outcome}\nobjections: ${call?.objections.join(", ") || "none"}\n` +
+      `asks: ${call?.askCount}\nsummary: ${call?.summary ?? ""}\nnext: ${call?.nextAction ?? ""}\n`,
+  );
+}
+
+async function cmdCalls(p: Parsed) {
+  const calls = await CallsRepo.list(
+    { status: (str(p.flags.status) || undefined) as never, campaignId: str(p.flags.campaign) || undefined },
+    int(p.flags.limit, 25),
+  );
+  if (!calls.length) return log.info("no calls yet");
+  for (const c of calls) {
+    const lead = await LeadsRepo.getById(c.leadId);
+    log.info(
+      `${c.createdAt.toISOString().slice(0, 16)} ${(lead?.email ?? c.leadId).padEnd(28)} ` +
+        `${c.status.padEnd(12)} ${(c.outcome ?? "-").padEnd(18)} ${c.durationSec}s asks=${c.askCount} ` +
+        `${c.objections.join(",") || "-"}${c.failureReason ? ` (${c.failureReason})` : ""}`,
+    );
+  }
+}
+
+async function cmdCallTranscript(p: Parsed) {
+  const id = p._[0] || str(p.flags.call);
+  if (!id) throw new Error("usage: cli call-transcript <callId>");
+  const call = await CallsRepo.getById(id);
+  if (!call) throw new Error(`call not found: ${id}`);
+  const lead = await LeadsRepo.getById(call.leadId);
+  // eslint-disable-next-line no-console
+  console.log(
+    `\n${lead?.email ?? call.leadId} — ${call.status}/${call.outcome ?? "?"} — ${call.durationSec}s\n` +
+      `objections: ${call.objections.join(", ") || "none"} | asks: ${call.askCount}\n`,
+  );
+  for (const t of call.transcript) {
+    // eslint-disable-next-line no-console
+    console.log(`${t.role === "agent" ? "🤖" : "🧑"} ${t.text}`);
+  }
+  // eslint-disable-next-line no-console
+  console.log(`\nsummary: ${call.summary ?? "(none)"}\nnext: ${call.nextAction ?? "(none)"}\n`);
+}
+
+/**
+ * Call your own phone, end to end, and print what happened.
+ *
+ * The checks below run BEFORE anything dials, because every one of them fails
+ * the same way from the handset — your phone rings and nobody is there — and
+ * that is indistinguishable from a bug in the agent. Better to refuse with a
+ * reason than to let you debug silence.
+ */
+async function cmdCallMe(p: Parsed) {
+  const phone = normalizePhone(str(p.flags.phone) || p._[0]);
+  if (!phone) {
+    throw new Error('usage: cli call-me --phone "+15551234567" [--name Alex] [--email you@x.com] [--campaign <c>] [--wait 240]');
+  }
+
+  const problems: string[] = [];
+  if (!config.voice.enabled) problems.push('VOICE_ENABLED is not true — set VOICE_ENABLED="true"');
+  if (config.sending.dryRun) {
+    problems.push('DRY_RUN is true — no real call is placed. Set DRY_RUN="false" for a live test');
+  }
+
+  // Check the carrier credentials directly rather than via getTelephony(): under
+  // DRY_RUN the dry-run provider reports itself "configured", which would hide a
+  // missing Twilio account until you flipped DRY_RUN off and tried again.
+  const missingTwilio = (
+    [
+      ["TWILIO_ACCOUNT_SID", config.voice.twilio.accountSid],
+      ["TWILIO_AUTH_TOKEN", config.voice.twilio.authToken],
+      ["TWILIO_FROM_NUMBER", config.voice.twilio.fromNumber],
+    ] as const
+  )
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
+  if (missingTwilio.length) {
+    problems.push(`no carrier — set ${missingTwilio.join(", ")} (a voice-capable Twilio number)`);
+  }
+  const sigReady = signatureValidationReady();
+  if (!sigReady.ready) problems.push(sigReady.reason!);
+
+  const voice = await realtimeAuthCheck();
+  if (!voice.ready) problems.push(`voice credentials: ${voice.reason}`);
+
+  // The bridge lives in the tracking server, NOT in this CLI process. If that
+  // host isn't running this build, Twilio connects the call to nothing.
+  let bridgeOk = false;
+  try {
+    const res = await fetch(`${config.tracking.baseURL}/voice/health`, { signal: AbortSignal.timeout(8000) });
+    const body = (await res.json().catch(() => ({}))) as { voiceEnabled?: boolean; model?: string };
+    bridgeOk = res.ok && Boolean(body.voiceEnabled);
+    if (!bridgeOk) {
+      problems.push(
+        `${config.tracking.baseURL}/voice/health did not report a live voice channel ` +
+          `(HTTP ${res.status}) — that host must be running THIS build with VOICE_ENABLED=true`,
+      );
+    } else {
+      log.info(`bridge reachable at ${config.tracking.baseURL} (model ${body.model})`);
+    }
+  } catch (err) {
+    problems.push(
+      `could not reach ${config.tracking.baseURL}/voice/health (${err instanceof Error ? err.message : String(err)}) — ` +
+        `Twilio must be able to reach it too, so localhost will not work; deploy or use a tunnel`,
+    );
+  }
+
+  if (problems.length) {
+    log.error("cannot place a live test call yet:");
+    for (const it of problems) log.error(`  ⛔ ${it}`);
+    log.info("nothing was dialed. Rehearse the conversation meanwhile: npm run cli -- call-sim <email> --persona '...'");
+    return;
+  }
+
+  // A real lead row, so the call runs the exact production path.
+  const email = str(p.flags.email) || config.notify.email || config.mail.fromEmail;
+  const lead = await LeadsRepo.upsertByEmail({
+    email,
+    phone,
+    name: str(p.flags.name) || "Test Call",
+    firstName: str(p.flags.name)?.split(" ")[0] || "there",
+    timezone: str(p.flags.timezone) || undefined,
+    source: "voice-selftest",
+  });
+
+  // A held-back call from an earlier attempt is still queued and still due, so
+  // dialing now would place it alongside the new one — two simultaneous calls
+  // to the same phone. Supersede them.
+  const stale = await CallsRepo.cancelQueuedForLead(lead._id, "superseded by a newer call-me run");
+  if (stale) log.info(`canceled ${stale} earlier queued call${stale === 1 ? "" : "s"} for this number`);
+
+  const campaign = str(p.flags.campaign) ? await ensureCampaign(str(p.flags.campaign)) : null;
+  const queued = await queueCall({ leadId: lead._id, campaignId: campaign?._id });
+  if (!queued.queued) throw new Error(`not queued — ${queued.reason}`);
+  log.info(`queued call ${queued.callId} → ${phone}; dialing now…`);
+
+  const placed = await dialDue();
+  if (!placed.placed) {
+    const call = await CallsRepo.getById(queued.callId!);
+    log.error(
+      `the dialer did not place it (status=${call?.status}${call?.failureReason ? `, ${call.failureReason}` : ""}). ` +
+        `If it is outside ${config.voice.dialing.windowStartHour}:00–${config.voice.dialing.windowEndHour}:00 local, ` +
+        `re-run with VOICE_WINDOW_START_HOUR=0 VOICE_WINDOW_END_HOUR=24`,
+    );
+    return;
+  }
+
+  log.info("📞 your phone should ring — answer it and try to give the agent a hard time");
+  const deadline = Date.now() + int(p.flags.wait, 240) * 1000;
+  let last = "";
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const call = await CallsRepo.getById(queued.callId!);
+    if (!call) break;
+    if (call.status !== last) {
+      log.info(`  status: ${call.status}`);
+      last = call.status;
+    }
+    if (["completed", "failed", "no_answer", "busy", "canceled"].includes(call.status)) {
+      // Post-call analysis runs right after hangup; give it a moment to land.
+      await new Promise((r) => setTimeout(r, 6000));
+      const done = await CallsRepo.getById(queued.callId!);
+      // eslint-disable-next-line no-console
+      console.log(`\n── how it went ──\nstatus: ${done?.status}   outcome: ${done?.outcome ?? "(pending)"}`);
+      // eslint-disable-next-line no-console
+      console.log(`duration: ${done?.durationSec}s   asks: ${done?.askCount}   objections: ${done?.objections.join(", ") || "none"}`);
+      for (const t of done?.transcript ?? []) {
+        // eslint-disable-next-line no-console
+        console.log(`${t.role === "agent" ? "🤖" : "🧑"} ${t.text}`);
+      }
+      // eslint-disable-next-line no-console
+      console.log(`\nsummary: ${done?.summary ?? "(none)"}\nnext: ${done?.nextAction ?? "(none)"}\n`);
+      return;
+    }
+  }
+  log.warn(`still in progress after the wait window — check later: npm run cli -- call-transcript ${queued.callId}`);
+}
+
+async function cmdVoicePreflight(p: Parsed) {
+  const lead = str(p.flags.lead) ? await LeadsRepo.getByEmail(str(p.flags.lead)) : null;
+  const campaign = str(p.flags.campaign) ? await ensureCampaign(str(p.flags.campaign)) : null;
+  const model = str(p.flags.model) || undefined;
+  const voiceName = str(p.flags.voice) || undefined;
+
+  log.info(`probing ${model ?? config.voice.realtime.model} (voice=${voiceName ?? config.voice.realtime.voice})…`);
+  const r = await voicePreflightAutodetect({
+    lead: lead ?? undefined,
+    campaign: campaign ?? undefined,
+    offer: str(p.flags.offer) || undefined,
+    model,
+    voice: voiceName,
+  });
+
+  if (!r.ok) {
+    log.error(`voice preflight FAILED (${r.model}, schema=${r.schema}): ${r.error}`);
+    return;
+  }
+  log.info(`✅ live voice session works — ${r.model}, schema=${r.schema}, voice=${r.voice}`);
+  const a = r.applied;
+  if (a) {
+    // Echoed back by the server, so this is what is REALLY in force — an
+    // unsupported audio setting is dropped silently rather than rejected.
+    log.info(
+      `   applied: voice=${a.voice} audio=${a.inputFormat}→${a.outputFormat} ` +
+        `transcribe=${a.transcriptionModel} noise=${a.noiseReduction}`,
+    );
+    // semantic_vad carries an eagerness; server_vad carries the raw timings.
+    log.info(
+      a.eagerness
+        ? `   turn-taking: ${a.vadType} eagerness=${a.eagerness}`
+        : `   turn-taking: ${a.vadType} threshold=${a.vadThreshold} ` +
+          `prefixPadding=${a.prefixPaddingMs}ms silence=${a.silenceMs}ms`,
+    );
+  }
+  log.info(`   ${r.durationSec}s of audio (${r.audioBytes} bytes μ-law)`);
+  if (r.humanizer) {
+    log.info(
+      `   humanizer: ${r.humanizer.enabled ? "on" : "off"} ` +
+        `noise=${r.humanizer.comfortNoiseDb}dB drive=${r.humanizer.driveDb}dB clarity=${r.humanizer.clarityDb}dB ` +
+        `fastStart=${r.humanizer.fastStart ? `${r.humanizer.fastStartRate}x/${r.humanizer.fastStartMs}ms` : "off"}`,
+    );
+  }
+  if (r.transcript) log.info(`   opener: "${r.transcript}"`);
+  if (r.wavPath) {
+    log.info(`   listen: open "${r.wavPath}"`);
+    log.info(`   details: ${r.wavPath.replace(/\.wav$/i, ".json")}`);
+  }
+}
+
+async function cmdCallCheck(p: Parsed) {
+  const email = p._[0] || str(p.flags.email);
+  if (!email) throw new Error("usage: cli call-check <email>");
+  const lead = await LeadsRepo.getByEmail(email);
+  if (!lead) throw new Error(`lead not found: ${email}`);
+  const gate = await canCall(lead);
+  log.info(`${lead.email} phone=${normalizePhone(lead.phone) ?? "(none)"} tz=${lead.timezone ?? "(server)"}`);
+  log.info(gate.allowed ? "✅ callable right now" : `⛔ blocked — ${gate.reason}: ${gate.detail}`);
+
+  // The lead can be perfectly callable while the channel itself can't talk.
+  const telephony = getTelephony();
+  log.info(`telephony: ${telephony.name} ${telephony.configured() ? "✅" : "⛔ not configured"}`);
+  const voice = await realtimeAuthCheck();
+  log.info(
+    voice.ready
+      ? `voice model: ✅ ${config.voice.realtime.model} (auth=${voice.source}` +
+        `${voice.minutesLeft !== undefined ? `, ${voice.minutesLeft} min left` : ""})`
+      : `voice model: ⛔ ${voice.reason}`,
+  );
+  if (voice.warning) log.warn(voice.warning);
+}
+
+async function cmdCallScript(p: Parsed) {
+  const email = p._[0] || str(p.flags.email);
+  if (!email) throw new Error('usage: cli call-script <email> [--campaign <name|id>] [--offer "..."]');
+  const lead = await LeadsRepo.getByEmail(email);
+  if (!lead) throw new Error(`lead not found: ${email}`);
+  const campaign = str(p.flags.campaign) ? await ensureCampaign(str(p.flags.campaign)) : null;
+  // eslint-disable-next-line no-console
+  console.log(
+    buildCallInstructions({ lead, campaign: campaign ?? undefined, offer: str(p.flags.offer) || undefined }),
+  );
+}
+
+async function cmdDnc(p: Parsed) {
+  const phone = str(p.flags.add);
+  if (phone) {
+    const normalized = await addToDnc(phone, str(p.flags.reason, "operator request"), "operator");
+    if (!normalized) throw new Error(`could not parse "${phone}" as a phone number`);
+    return log.info(`added ${normalized} to the do-not-call list`);
+  }
+  const entries = await DncRepo.list(int(p.flags.limit, 50));
+  if (!entries.length) return log.info("do-not-call list is empty");
+  for (const e of entries) {
+    log.info(`${e._id.padEnd(16)} ${e.source.padEnd(9)} ${e.createdAt.toISOString().slice(0, 10)} ${e.reason}`);
+  }
+}
+
 const HELP = `AI SDR CLI
   init                          create indexes
   import-leads <csv>            import leads from CSV (header row required, must include 'email')
@@ -703,6 +1039,16 @@ const HELP = `AI SDR CLI
   source-leads --titles "VP Ops,COO" --industries "Healthcare" [--keywords] [--limit]   Apollo (paid)
   source-leads-apify [--limit 30000] [--titles "..."] [--industries "..."]   Apify actor (paid)
   research --email <e>          web-research a lead + save hooks
+  call-lead <email> [--campaign <id>] [--at <iso>]   queue an AI cold call to one lead
+  dial                          place due queued calls now (respects hours, caps, DNC)
+  call-sim <email> [--persona "..."] [--offer "..."] [--turns 14]   rehearse the call in text, no phone needed
+  calls [--status <s>] [--campaign <id>] [--limit 25]   recent calls + outcomes
+  call-transcript <callId>      full turn-by-turn transcript of one call
+  call-check <email>            dry-run the compliance gate for one lead
+  voice-preflight [--model <m>] [--voice <v>] [--lead <e>]   open a REAL voice session, save the opener as WAV
+  call-me --phone "+1555..." [--name] [--email] [--campaign] [--wait 240]   call YOUR phone end-to-end and print the transcript
+  call-script <email> [--campaign <c>] [--offer "..."]   print the exact instructions the voice agent gets
+  dnc [--add <phone> --reason "..."]   view or extend the do-not-call list
   approvals                     list pending approvals
   approve <id> | deny <id>      decide a pending approval
   ingest-reply --email --text [--message]   simulate an inbound reply
@@ -771,6 +1117,16 @@ async function run() {
     case "source-leads": await cmdSourceLeads(p); break;
     case "source-leads-apify": await cmdSourceLeadsApify(p); break;
     case "research": await cmdResearch(p); break;
+    case "call-lead": await cmdCallLead(p); break;
+    case "dial": await cmdDial(); break;
+    case "call-sim": await cmdCallSim(p); break;
+    case "calls": await cmdCalls(p); break;
+    case "call-transcript": await cmdCallTranscript(p); break;
+    case "call-check": await cmdCallCheck(p); break;
+    case "voice-preflight": await cmdVoicePreflight(p); break;
+    case "call-me": await cmdCallMe(p); break;
+    case "call-script": await cmdCallScript(p); break;
+    case "dnc": await cmdDnc(p); break;
     case "approvals": await cmdApprovals(); break;
     case "approve": await cmdApprove(p); break;
     case "deny": await cmdDeny(p); break;
@@ -787,11 +1143,40 @@ async function run() {
   }
 }
 
+/**
+ * The OpenAI SDK reports an unreachable endpoint as the bare string
+ * "Connection error.", which sends you hunting through the wrong code. The
+ * usual cause here is a WORKER_BASE_URL pointing at the local OAuth harness
+ * proxy, which only runs inside `npm start` — so a standalone CLI process has
+ * nothing to talk to. Say that instead.
+ */
+function explainConnectionError(err: unknown): string | undefined {
+  const message = err instanceof Error ? err.message : String(err);
+  const cause = (err as { cause?: { code?: string } })?.cause?.code ?? "";
+  const looksLikeConnRefused =
+    /connection error|ECONNREFUSED|fetch failed|ENOTFOUND/i.test(`${message} ${cause}`);
+  if (!looksLikeConnRefused) return undefined;
+
+  const lines = [
+    `could not reach the LLM endpoint — ${message}`,
+    `  worker:     ${worker.configured ? worker.route : "not configured"}`,
+    `  strategist: ${strategist.configured ? strategist.route : "not configured"}`,
+  ];
+  if (/127\.0\.0\.1|localhost/.test(config.llm.worker.baseURL)) {
+    lines.push(
+      `  WORKER_BASE_URL points at a local proxy (${config.llm.worker.baseURL}).`,
+      `  That proxy is started by \`npm start\`, not by the CLI — run \`npm start\` in`,
+      `  another terminal, or point WORKER_BASE_URL/WORKER_API_KEY at a hosted endpoint.`,
+    );
+  }
+  return lines.join("\n");
+}
+
 run()
   .then(() => closeDb())
   .then(() => process.exit(0))
   .catch(async (err) => {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(explainConnectionError(err) ?? (err instanceof Error ? err.message : String(err)));
     await closeDb();
     process.exit(1);
   });

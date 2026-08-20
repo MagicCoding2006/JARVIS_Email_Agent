@@ -11,3 +11,6 @@ data/videos/*.wav
 data/videos/screenshots/
 remotion/out/
 remotion/public/
+
+# Generated voice preflight audio
+data/voice/

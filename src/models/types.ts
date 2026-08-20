@@ -18,6 +18,8 @@ export type LeadStatus =
 export interface Lead {
   _id: string;
   email: string;
+  /** E.164 phone number (+15551234567) — required for voice outreach. */
+  phone?: string;
   name?: string;
   firstName?: string;
   lastName?: string;
@@ -182,7 +184,20 @@ export type EventType =
   | "closed_won"
   | "closed_lost"
   | "unsubscribe"
-  | "video_watched";
+  | "video_watched"
+  // ── voice / cold calling ──────────────────────────────────────────────────
+  /** An outbound call was actually placed to the carrier. */
+  | "call_placed"
+  /** A human answered and stayed on long enough to have a conversation. */
+  | "call_connected"
+  /** Interested / asked for a callback / agreed to next step (short of booking). */
+  | "call_positive"
+  /** Explicit brush-off, not a fit, or hostile. */
+  | "call_negative"
+  | "call_no_answer"
+  | "call_voicemail"
+  /** Prospect asked not to be called again — hard stop across every channel. */
+  | "call_dnc";
 
 export interface Event {
   _id: string;
@@ -275,6 +290,100 @@ export interface VideoAsset {
   error?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+// ── Voice / cold calling ────────────────────────────────────────────────────
+
+export type CallStatus =
+  /** Waiting for the dialer to pick it up. */
+  | "queued"
+  /** Handed to the carrier; ringing. */
+  | "dialing"
+  /** Answered — the media bridge is live. */
+  | "in_progress"
+  /** Hung up normally (see `outcome` for what actually happened). */
+  | "completed"
+  | "no_answer"
+  | "busy"
+  | "failed"
+  /** Compliance gate refused it (DNC, outside hours, capped) — see failureReason. */
+  | "skipped"
+  | "canceled";
+
+/** What the conversation actually produced. Set by post-call analysis. */
+export type CallOutcome =
+  | "meeting_booked"
+  | "callback_requested"
+  | "interested"
+  | "not_interested"
+  | "not_a_fit"
+  | "wrong_person"
+  | "gatekeeper"
+  | "voicemail"
+  | "no_answer"
+  | "do_not_call"
+  | "hung_up"
+  | "unknown";
+
+export interface CallTurn {
+  role: "agent" | "prospect";
+  text: string;
+  at: Date;
+}
+
+/**
+ * One outbound call attempt. Mirrors `Message` for the voice channel: the
+ * dialer selects `queued` rows the way the dispatcher selects `scheduled`
+ * messages, and the same events/scoring/CRM machinery consumes the results.
+ */
+export interface Call {
+  _id: string;
+  leadId: string;
+  campaignId?: string;
+  enrollmentId?: string;
+  /** E.164 destination, snapshotted at queue time. */
+  toNumber: string;
+  fromNumber: string;
+  /** Telephony provider that carried it ("twilio", "dry-run", "simulator"). */
+  provider: string;
+  /** Carrier-side id (Twilio CallSid) — how status callbacks find this row. */
+  providerCallId?: string;
+  status: CallStatus;
+  /** 1-based attempt number for this lead+campaign (retry ladder). */
+  attempt: number;
+  /** A/B script variant used, so call scripts learn like email variants do. */
+  scriptId?: string;
+  outcome?: CallOutcome;
+  /** Objection codes raised by the prospect (see voice/objections.ts). */
+  objections: string[];
+  /** How many times the agent asked for the meeting — the close-ladder counter. */
+  askCount: number;
+  transcript: CallTurn[];
+  summary?: string;
+  nextAction?: string;
+  recordingUrl?: string;
+  /** ISO time the prospect verbally committed to, when one was agreed. */
+  meetingTime?: string;
+  durationSec: number;
+  scheduledAt: Date;
+  startedAt?: Date;
+  endedAt?: Date;
+  failureReason?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Do-not-call list. Keyed by normalized E.164 number so it blocks the number
+ * even if it later shows up on a different lead record.
+ */
+export interface DncEntry {
+  /** Normalized E.164 number. */
+  _id: string;
+  reason: string;
+  leadId?: string;
+  source: "prospect" | "operator" | "agent";
+  createdAt: Date;
 }
 
 export type ApprovalStatus = "pending" | "approved" | "denied" | "executed" | "failed";

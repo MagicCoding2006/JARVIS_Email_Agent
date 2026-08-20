@@ -6,9 +6,10 @@ Guidance for Claude Code (and humans) working in this repo.
 
 An **autonomous-but-controlled AI SDR/BDR system**. It manages leads, runs
 multi-touch cold-email campaigns, personalizes every email with an LLM, tracks
-engagement, scores leads, books meetings, generates video outreach, notifies a
-human on hot signals, and **learns from results** via daily/weekly/monthly
-strategist reviews that auto-generate and A/B-test new email variants.
+engagement, scores leads, books meetings, generates video outreach, **cold-calls
+prospects with a live speech-to-speech voice agent**, notifies a human on hot
+signals, and **learns from results** via daily/weekly/monthly strategist reviews
+that auto-generate and A/B-test new email variants.
 
 Node 20 + TypeScript (ESM, run via `tsx`) + MongoDB Atlas (`email_db`).
 
@@ -69,7 +70,14 @@ Key CLI verbs: `import-leads`, `create-campaign`, `enroll`, `cancel-enrollments`
 `chat`, `agent-cycle`, `discover-leads`, `discover-businesses`,
 `discover-contractors`, `verify-email`, `source-leads`, `research`,
 `crm`, `crm-export`, `approvals`, `approve`/`deny`, `ingest-reply`,
-`reply-drafts`, `human-digest`, `sync-meetings`, `event`, `status`, `lead`.
+`reply-drafts`, `human-digest`, `sync-meetings`, `event`, `status`, `lead`,
+`call-lead`, `dial`, `call-sim`, `calls`, `call-transcript`, `call-check`,
+`call-script`, `voice-preflight`, `call-me`, `dnc`.
+
+Rehearse the calling bot with no phone number and no Twilio account:
+`npm run cli call-sim <email> --persona "skeptical owner, mid-job"`.
+Prove the live voice model works before anyone's phone rings (opens a real
+realtime session, saves the spoken opener as a WAV): `npm run cli voice-preflight`.
 
 Chat with the brain from the terminal: `npm run cli chat --text "how are we doing?"`.
 Run the autonomous daily brain on demand: `npm run cli agent-cycle`.
@@ -89,10 +97,13 @@ src/
                    personalization, sequencer, tracking, scoring, replies,
                    notifications, reporting, analytics, variants (bandit),
                    booking, compose (Gmail pixel), search, apollo, research,
-                   video.service + video/ (gemini-tts, scene-spec, remotion), sender/
-  workers/       scheduled jobs: dispatcher, event-processor, autonomous-cycle,
-                   daily/weekly/monthly, scheduler
+                   video.service + video/ (gemini-tts, scene-spec, remotion), sender/,
+                   voice/ (script, objections, compliance, openai-realtime,
+                     twilio.telephony, media-bridge, call-tools, call-analysis, simulator)
+  workers/       scheduled jobs: dispatcher, dialer, event-processor,
+                   autonomous-cycle, daily/weekly/monthly, scheduler
   server/        tracking-server.ts (pixel, click, unsub, reply/booking webhooks, video, createPixel)
+                 voice.routes.ts (TwiML answer + call status; wss media stream)
   cli/           operator CLI
 remotion/        separate Remotion project (install only if rendering video)
 ```
@@ -136,6 +147,14 @@ Full layer-by-layer status and the data model are in [ARCHITECTURE.md](./ARCHITE
    tells the operator what needs a human; `weekly-review` prunes losers +
    breakdowns; `monthly-review` summarizes outcomes. Drive everything live via
    Telegram.
+7. **Voice** (`VOICE_ENABLED=true`): `queue_calls` / `call-lead` puts a row in
+   `calls`; the `dialer` (cron /2m) re-checks the compliance gate at dial time
+   and originates via Twilio; the answered leg streams μ-law audio to a
+   speech-to-speech model through `media-bridge.ts`, which enforces barge-in,
+   the ask ceiling, and a hard hangup in code. Post-call analysis writes one
+   worker-LLM classification back into the SAME `events` pipeline, so calls
+   score, escalate, and stop sequences exactly like emails do. Full design and
+   the go-live checklist: [VOICE.md](./VOICE.md).
 
 ## Conventions
 
@@ -147,7 +166,16 @@ Full layer-by-layer status and the data model are in [ARCHITECTURE.md](./ARCHITE
   `strategist`, and always have a non-LLM fallback (see `personalization.service`).
 - Email sending goes through the `EmailSender` interface — never call nodemailer
   from business logic. Add providers in `services/sender/`.
-- Respect `config.sending.dryRun`; the dispatcher and DryRunSender already do.
+- Voice has the same split: carriers implement `TelephonyProvider`, voice models
+  implement `RealtimeVoice` (`services/voice/voice.interface.ts`). Never reach
+  for Twilio or a realtime SDK outside `services/voice/`.
+- **Voice guardrails belong in code, not prompts.** Anything that must hold every
+  time — DNC, calling hours, attempt caps, the ask ceiling, the call-duration
+  cutoff — goes in `compliance.service.ts` or `media-bridge.ts`. A prompt is
+  where you put the pitch, not the limits. The rule that the agent never denies
+  being an AI is deliberately hardcoded and has no env var.
+- Respect `config.sending.dryRun`; the dispatcher, DryRunSender, and
+  DryRunTelephony already do.
 - **New agent tool?** Add a `Tool` in `agent/tools/*.tools.ts`, register it in
   `agent/tools/index.ts`, and set `risk` honestly (`high` if it spends money,
   sends, or changes live campaigns). The autonomy/approval gating is automatic.
@@ -201,4 +229,14 @@ the CRM table shows the running total.
   prospects (deploy the tracking server or reuse the Cloud Run host).
 - **Deliverability:** SPF/DKIM/DMARC + inbox warmup (Instantly) before volume.
   Keep `DAILY_SEND_LIMIT` low at first. Sequences auto-stop on opt-out/bounce.
+- **Voice needs the SAME public HTTPS host as tracking.** Twilio fetches the
+  TwiML from `TRACKING_BASE_URL` and opens the `wss://` media stream against it;
+  localhost gets you a connected call with silence.
+- **Voice costs money per connected minute twice over** (carrier + realtime
+  session). `VOICE_MAX_CONCURRENT` and `VOICE_DAILY_CALL_LIMIT` are the spend
+  ceiling — set them before tuning the pitch. `DRY_RUN=true` covers calls too.
+- **Cold calling is regulated** and the rules vary by country and US state
+  (consent, DNC registries, recording consent, AI disclosure). The built-in gate
+  enforces your configured window, your caps, and an internal DNC list — it does
+  **not** scrub national DNC registries. See [VOICE.md](./VOICE.md) §9.
 - Default to the latest Claude models if you ever add a third LLM role.

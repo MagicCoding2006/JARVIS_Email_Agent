@@ -18,6 +18,15 @@ import { getPipelineInventory, autoEnroll } from "./pipeline.tools.js";
 import { sendReply } from "./reply.tools.js";
 import { getMeetings } from "./meeting.tools.js";
 import { listSiteFiles, readSiteFile, proposeSiteChange } from "./site.tools.js";
+import {
+  queueCalls,
+  getCallMetrics,
+  listCalls,
+  getCallTranscript,
+  checkCallEligibility,
+  addToDncTool,
+  getObjectionPlaybook,
+} from "./call.tools.js";
 import { listCodeFiles, readCodeFile, proposeCodeChange } from "./code.tools.js";
 import {
   getLead,
@@ -52,6 +61,11 @@ const TOOLS: Tool[] = [
   readSiteFile,
   listCodeFiles,
   readCodeFile,
+  getCallMetrics,
+  listCalls,
+  getCallTranscript,
+  checkCallEligibility,
+  getObjectionPlaybook,
   // low-risk actions (auto under semi)
   genVariants,
   prune,
@@ -65,7 +79,9 @@ const TOOLS: Tool[] = [
   autoEnroll,
   discover,
   proposeSiteChange,
+  addToDncTool,
   // high-risk actions (need approval under semi)
+  queueCalls,
   proposeCodeChange,
   createCampaign,
   setCampaignStatus,

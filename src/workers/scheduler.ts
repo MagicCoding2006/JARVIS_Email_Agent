@@ -9,6 +9,7 @@ import { runAutonomousCycle } from "./autonomous-cycle.js";
 import { runWeeklyReview } from "./weekly-review.js";
 import { runMonthlyReview } from "./monthly-review.js";
 import { processReplyDrafts } from "./reply-drafts.js";
+import { dialDue } from "./dialer.js";
 import { runHumanDigest } from "./human-digest.js";
 import { syncMeetings } from "./meeting-lifecycle.js";
 import { calendlyEnabled } from "../services/calendly.service.js";
@@ -17,6 +18,7 @@ import { pruneOldVideos } from "../services/video/retention.js";
 
 const log = createLogger("scheduler");
 let dispatchRunning = false;
+let dialRunning = false;
 
 /** Wire up the recurring jobs. Returns the scheduled tasks for shutdown. */
 export function startScheduler(): cron.ScheduledTask[] {
@@ -55,6 +57,28 @@ export function startScheduler(): cron.ScheduledTask[] {
       processReplyDrafts().catch((err) => log.error("reply-draft job failed", err));
     }),
   );
+
+  // Place due outbound calls (every 2 minutes). The dialer self-limits to the
+  // per-lead calling window, concurrency, and the daily cap, and holds rows
+  // that aren't dialable yet rather than burning them.
+  if (config.voice.enabled) {
+    tasks.push(
+      cron.schedule("*/2 * * * *", async () => {
+        if (dialRunning) {
+          log.warn("dialer still running — skipping overlapping run");
+          return;
+        }
+        dialRunning = true;
+        try {
+          await dialDue();
+        } catch (err) {
+          log.error("dialer job failed", err);
+        } finally {
+          dialRunning = false;
+        }
+      }),
+    );
+  }
 
   // Calendly meeting lifecycle (hourly): backfill booked meetings, send ~24h
   // reminders, record marked no-shows + queue rebooking drafts.
@@ -122,7 +146,7 @@ export function startScheduler(): cron.ScheduledTask[] {
   );
 
   log.info(
-    `scheduler started (dispatch /5m, events /10m, reply-drafts /15m${imapEnabled() ? ", imap /1m" : ""}${calendlyEnabled() ? ", meetings /1h" : ""}, daily 08:30, digest Mon 08:00, weekly Mon 09:00, monthly 1st 09:30${config.video.retentionDays > 0 ? `, video-prune 03:20 (${config.video.retentionDays}d)` : ""})`,
+    `scheduler started (dispatch /5m, events /10m, reply-drafts /15m${config.voice.enabled ? ", dialer /2m" : ""}${imapEnabled() ? ", imap /1m" : ""}${calendlyEnabled() ? ", meetings /1h" : ""}, daily 08:30, digest Mon 08:00, weekly Mon 09:00, monthly 1st 09:30${config.video.retentionDays > 0 ? `, video-prune 03:20 (${config.video.retentionDays}d)` : ""})`,
   );
   return tasks;
 }
